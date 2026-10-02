@@ -16,7 +16,9 @@ Postgres database (one-db-per-service).
 Generated via `pure-service-generator` (giter8 template over `purerest`),
 field-spec applied from `gluon/specs/payment.yaml`, hand-extended per
 `gluon/backlogs/payment-service.md`: the `status` field hardened to a closed
-ADT (done); US-6.1/US-6.2 below remain backlog items, not yet implemented.
+ADT (done); US-6.1 done (consumes `order.reserved`, charges (simulated),
+publishes `payment.settled`/`payment.failed`); US-6.2 remains a backlog
+item, not yet implemented.
 
 ## Domain model
 - **Payment** — `orderId` (create-only, logical reference to order-service's
@@ -30,10 +32,17 @@ ADT (done); US-6.1/US-6.2 below remain backlog items, not yet implemented.
 - No other fields generated — the full CRUD surface (`POST`/`GET`/`PATCH`/
   `PUT`/`DELETE /payments{/id}`) matches the field-spec exactly; nothing
   codegen couldn't represent beyond the enum gap above.
+- **Known gotcha fixed in `OrderReservedConsumer`:** a null Kafka message key
+  (e.g. a producer that never sets one) used to crash the whole background
+  consumer stream silently; both key and value deserializers are now
+  `Option[String]` (fs2-kafka's `Deserializer.option`) to guard against
+  this. The same latent issue likely exists in order-service's
+  `StockEventConsumer` (same `ConsumerSettings[F, String, String]` pattern)
+  — not fixed there, out of scope for this repo.
 
 ## User stories in scope (gluon/docs/user-stories.md)
 - US-6.1 — consume `order.reserved`, charge, publish `payment.settled` /
-  `payment.failed`
+  `payment.failed` (done)
 - US-6.2 — Redis idempotency keys to avoid double-charging on
   retry/redelivery
 
@@ -46,14 +55,19 @@ ADT (done); US-6.1/US-6.2 below remain backlog items, not yet implemented.
   idempotency is proven by replaying the same synthetic event twice.
 
 ## Events
-- Consumes: `order.reserved` — ⚠ **no producer defined yet** in
-  order-service (see `gluon/docs/system-design.md`'s "Open design
-  questions" — the `order.reserved` producer gap must be resolved in
-  order-service before US-6.1 can be implemented against a real payload,
-  though the stubbed/synthetic-event test path is unaffected).
-- Publishes: `payment.settled`, `payment.failed` — no payload contract
-  documented yet in `gluon/docs/system-design.md`; add one there (not just
-  in this repo) when US-6.1 defines it.
+- Consumes: `order.reserved` (done) — `OrderReservedConsumer` subscribes
+  (group `payment-service-order-reserved`), creates a `Payment` directly via
+  `PaymentStore` (no HTTP round-trip), simulates a charge (always succeeds —
+  no real provider decided yet, see Out of scope), publishes
+  `payment.settled`. No retry on the consume side (decode/null-value
+  failures are logged and the offset still committed, matching
+  order-service's `StockEventConsumer`); no duplicate-delivery guard (that's
+  US-6.2).
+- Publishes: `payment.settled`, `payment.failed` (done, payload pinned in
+  `gluon/docs/system-design.md`) — via `PaymentEventPublisher`, keyed by
+  `orderId`, each publish wrapped in a hand-rolled cats-retry bounded retry
+  (`purerest.resilience` is `Client[F]`-only, doesn't apply to a Kafka
+  producer call) that logs loudly and drops on exhaustion.
 
 ## Out of scope for this service
 - Auth/identity (bare `customerId`/`orderId` for now — no user-service yet)
