@@ -1,0 +1,12 @@
+Phase 1 verification report: Tech stack & infra (US-6.1)
+
+Automated tests: sbt scalafmtCheck test -> 63/63 passed, formatting clean.
+
+Manual verification: scripts/verify-kafka-config.sh (committed in this commit) instead of an interactive walkthrough, per .claude/prompt-off. Brings up postgres+kafka together via docker compose, confirms both report healthy, then runs a real `sbt run` to confirm PaymentServiceConfig (now requiring a kafka block) loads cleanly and the service reaches /health -> 200.
+
+All checks passed:
+- postgres healthy
+- kafka healthy
+- payment-service booted with the new kafka config (200)
+
+Confirmation: no interactive user confirmation sought for this phase - .claude/prompt-off is set for this project, so the script's pass/fail is the verification signal per that skill's protocol.
