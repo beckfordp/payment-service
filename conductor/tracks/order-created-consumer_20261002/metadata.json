@@ -1,8 +1,0 @@
-{
-  "track_id": "order-created-consumer_20261002",
-  "type": "feature",
-  "status": "new",
-  "created_at": "2026-10-02T12:19:03Z",
-  "updated_at": "2026-10-02T12:19:03Z",
-  "description": "US-6.1: consume order.created, charge, publish payment.settled / payment.failed"
-}

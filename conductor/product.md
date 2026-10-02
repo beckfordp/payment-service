@@ -32,7 +32,7 @@ ADT (done); US-6.1/US-6.2 below remain backlog items, not yet implemented.
   codegen couldn't represent beyond the enum gap above.
 
 ## User stories in scope (gluon/docs/user-stories.md)
-- US-6.1 — consume `order.created`, charge, publish `payment.settled` /
+- US-6.1 — consume `order.reserved`, charge, publish `payment.settled` /
   `payment.failed`
 - US-6.2 — Redis idempotency keys to avoid double-charging on
   retry/redelivery
@@ -40,15 +40,15 @@ ADT (done); US-6.1/US-6.2 below remain backlog items, not yet implemented.
 ## Sequencing (gluon/PLAN.md)
 - **Phase 4** (after Phases 1–3 prove the sync-reserve + async-outcome
   patterns) — US-6.1, US-6.2. Stub/fan-out: drive the consumer with
-  synthetic `order.created` events published to a test Kafka — no live
+  synthetic `order.reserved` events published to a test Kafka — no live
   order-service needed; the "charge" step itself is stubbed/simulated (no
   real payment provider decided yet, see Open design questions below);
   idempotency is proven by replaying the same synthetic event twice.
 
 ## Events
-- Consumes: `order.created` — ⚠ **no producer defined yet** in
+- Consumes: `order.reserved` — ⚠ **no producer defined yet** in
   order-service (see `gluon/docs/system-design.md`'s "Open design
-  questions" — the `order.created` producer gap must be resolved in
+  questions" — the `order.reserved` producer gap must be resolved in
   order-service before US-6.1 can be implemented against a real payload,
   though the stubbed/synthetic-event test path is unaffected).
 - Publishes: `payment.settled`, `payment.failed` — no payload contract

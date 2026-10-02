@@ -1,7 +1,7 @@
-# Specification: US-6.1 consume order.created, charge, publish payment.settled/payment.failed
+# Specification: US-6.1 consume order.reserved, charge, publish payment.settled/payment.failed
 
 ## Overview
-payment-service consumes `order.created` from Kafka, creates a `Payment`
+payment-service consumes `order.reserved` from Kafka, creates a `Payment`
 record directly via `PaymentStore` (no HTTP round-trip), simulates a charge
 (always succeeds in this track — no real provider decided yet, separate ADR
 backlog item), and publishes `payment.settled`/`payment.failed` to Kafka.
@@ -12,12 +12,12 @@ serializer layer), Testcontainers Kafka for tests, per-service local
 event-shape mirrors (no shared schema registry).
 
 ## Functional Requirements
-- New `OrderCreatedEvent(orderId: String, customerId: String, totalCents:
-  Int, timestamp: Instant)` — local mirror of the pinned `order.created`
+- New `OrderReservedEvent(orderId: String, customerId: String, totalCents:
+  Int, timestamp: Instant)` — local mirror of the pinned `order.reserved`
   payload (`gluon/docs/system-design.md`), circe `Codec` via `deriveCodec`.
-- New `OrderCreatedConsumer.run[F]`: one `fs2.Stream` via
-  `KafkaConsumer.stream(consumerSettings).subscribeTo("order.created").records`,
-  consumer group `payment-service-order-created`, `AutoOffsetReset.Earliest`.
+- New `OrderReservedConsumer.run[F]`: one `fs2.Stream` via
+  `KafkaConsumer.stream(consumerSettings).subscribeTo("order.reserved").records`,
+  consumer group `payment-service-order-reserved`, `AutoOffsetReset.Earliest`.
   Per record: decode JSON; on decode failure, log error and commit offset
   (skip, matching `StockEventConsumer`'s precedent — no retry on the
   consume/processing side); on success, call `PaymentStore.create(orderId,
@@ -54,16 +54,16 @@ event-shape mirrors (no shared schema registry).
   inventory-service/order-service.
 - Scalafmt-clean; tagless-final / ADT-error style per
   `development-guidelines.md`.
-- No duplicate-delivery guard in this track — a redelivered `order.created`
+- No duplicate-delivery guard in this track — a redelivered `order.reserved`
   creates a second `Payment` row for the same `orderId`; that's explicitly
   US-6.2's job (Redis idempotency keys), not this track's.
 
 ## Acceptance Criteria
-- A synthetic `order.created` event published to a test Kafka
+- A synthetic `order.reserved` event published to a test Kafka
   (Testcontainers) results in a `Payment` created with status `settled`, and
   a `payment.settled` event published with the correct
   `orderId`/`paymentId`/`amountCents`.
-- A malformed `order.created` payload is logged as a decode failure and does
+- A malformed `order.reserved` payload is logged as a decode failure and does
   not crash the consumer stream; the offset is still committed.
 - `PaymentEventPublisher.publishFailed` is covered by a direct unit test
   (forcing the failure path), since the charge-simulation itself always
@@ -82,7 +82,7 @@ event-shape mirrors (no shared schema registry).
   backlog item.
 - Real payment provider integration — separate ADR backlog item; charge is
   simulated (always succeeds) in this track.
-- order-service's own `order.created` producer and `OrderStatus`
+- order-service's own `order.reserved` producer and `OrderStatus`
   `Confirmed`/`PaymentFailed` cases — a different repo/track; this track
   only needs order-service's documented payload contract, not its
   implementation.

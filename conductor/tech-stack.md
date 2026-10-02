@@ -43,7 +43,7 @@
 
 ## Not yet in `build.sbt` (needed for upcoming backlog items)
 - Kafka client (fs2-kafka, matching inventory-service's US-5.1 choice) — for
-  US-6.1 (consume `order.created`, publish `payment.settled` /
+  US-6.1 (consume `order.reserved`, publish `payment.settled` /
   `payment.failed`)
 - Redis client — for US-6.2 (idempotency keys to avoid double-charging on
   retry/redelivery)
