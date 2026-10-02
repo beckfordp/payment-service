@@ -23,7 +23,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       def get(id: String): IO[Option[Payment]] = IO.pure(None)
       def update(
           id: String,
-          status: String
+          status: PaymentStatus
       ): IO[Option[Payment]] =
         IO.raiseError(error)
       def delete(id: String): IO[Boolean] = IO.raiseError(error)
@@ -216,6 +216,96 @@ class PaymentRoutesSuite extends CatsEffectSuite {
     } yield {
       assertEquals(patchResponse.status, Status.Ok)
       assertEquals(updated.id, created.id)
+    }
+  }
+
+  test(
+    "PATCH /payments/{id} accepts \"settled\" and \"failed\" statuses"
+  ) {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
+      postResponse <- routes.orNotFound.run(
+        Request[IO](Method.POST, uri"/payments").withEntity(
+          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+        )
+      )
+      created <- postResponse.as[PaymentResponse]
+      settledResponse <- routes.orNotFound.run(
+        Request[IO](Method.PATCH, uri"/payments" / created.id)
+          .withEntity(UpdatePaymentRequest("settled"))
+      )
+      settled <- settledResponse.as[PaymentResponse]
+      failedResponse <- routes.orNotFound.run(
+        Request[IO](Method.PATCH, uri"/payments" / created.id)
+          .withEntity(UpdatePaymentRequest("failed"))
+      )
+      failed <- failedResponse.as[PaymentResponse]
+    } yield {
+      assertEquals(settledResponse.status, Status.Ok)
+      assertEquals(settled.status, "settled")
+      assertEquals(failedResponse.status, Status.Ok)
+      assertEquals(failed.status, "failed")
+    }
+  }
+
+  test(
+    "PATCH /payments/{id} returns 400 with a JSON error body for an invalid status, and persists nothing"
+  ) {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
+      postResponse <- routes.orNotFound.run(
+        Request[IO](Method.POST, uri"/payments").withEntity(
+          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+        )
+      )
+      created <- postResponse.as[PaymentResponse]
+      patchResponse <- routes.orNotFound.run(
+        Request[IO](Method.PATCH, uri"/payments" / created.id)
+          .withEntity(UpdatePaymentRequest("bogus"))
+      )
+      body <- patchResponse.as[io.circe.Json]
+      getResponse <- routes.orNotFound.run(
+        Request[IO](Method.GET, uri"/payments" / created.id)
+      )
+      unchanged <- getResponse.as[PaymentResponse]
+    } yield {
+      assertEquals(patchResponse.status, Status.BadRequest)
+      assert(
+        body.asObject.exists(_.contains("error")),
+        s"expected a JSON error body, got: $body"
+      )
+      assertEquals(unchanged.status, "pending")
+    }
+  }
+
+  test(
+    "PATCH /payments/{id} logs a WARN for an invalid status"
+  ) {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      testLogger = StructuredTestingLogger.impl[IO]()
+      routes = PaymentRoutes.routes[IO](store, testLogger)
+      postResponse <- routes.orNotFound.run(
+        Request[IO](Method.POST, uri"/payments").withEntity(
+          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+        )
+      )
+      created <- postResponse.as[PaymentResponse]
+      _ <- testLogger.logged // drain POST's own log lines before the PATCH
+      patchResponse <- routes.orNotFound.run(
+        Request[IO](Method.PATCH, uri"/payments" / created.id)
+          .withEntity(UpdatePaymentRequest("bogus"))
+      )
+      logged <- testLogger.logged
+    } yield {
+      assertEquals(patchResponse.status, Status.BadRequest)
+      val warns = logged.collect { case m: WARN => m }
+      assert(
+        warns.exists(m => m.message.toLowerCase.contains("invalid status")),
+        s"expected an 'invalid status' WARN line, got: $warns"
+      )
     }
   }
 
@@ -444,6 +534,37 @@ class PaymentRoutesSuite extends CatsEffectSuite {
         body.asObject.exists(_.contains("error")),
         s"expected a JSON error body, got: $body"
       )
+    }
+  }
+
+  test(
+    "PUT /payments/{id} returns 400 with a JSON error body for an invalid status, and persists nothing"
+  ) {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
+      postResponse <- routes.orNotFound.run(
+        Request[IO](Method.POST, uri"/payments").withEntity(
+          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+        )
+      )
+      created <- postResponse.as[PaymentResponse]
+      putResponse <- routes.orNotFound.run(
+        Request[IO](Method.PUT, uri"/payments" / created.id)
+          .withEntity(UpdatePaymentRequest("bogus"))
+      )
+      body <- putResponse.as[io.circe.Json]
+      getResponse <- routes.orNotFound.run(
+        Request[IO](Method.GET, uri"/payments" / created.id)
+      )
+      unchanged <- getResponse.as[PaymentResponse]
+    } yield {
+      assertEquals(putResponse.status, Status.BadRequest)
+      assert(
+        body.asObject.exists(_.contains("error")),
+        s"expected a JSON error body, got: $body"
+      )
+      assertEquals(unchanged.status, "pending")
     }
   }
 

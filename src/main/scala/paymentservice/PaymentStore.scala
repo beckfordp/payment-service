@@ -6,7 +6,7 @@ import cats.syntax.all._
 import fs2.io.net.Network
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.Meter
-import skunk.Session
+import skunk.{Codec, Session}
 import skunk.codec.all._
 import skunk.implicits._
 
@@ -18,7 +18,7 @@ final case class Payment(
     id: String,
     orderId: String,
     amountCents: Int,
-    status: String,
+    status: PaymentStatus,
     createdAt: java.time.Instant,
     updatedAt: java.time.Instant
 )
@@ -26,14 +26,21 @@ final case class Payment(
 trait PaymentStore[F[_]] {
   def create(orderId: String, amountCents: Int): F[Payment]
   def get(id: String): F[Option[Payment]]
-  def update(id: String, status: String): F[Option[Payment]]
+  def update(id: String, status: PaymentStatus): F[Option[Payment]]
   def delete(id: String): F[Boolean]
   def ping: F[Boolean]
 }
 
 object PaymentStore {
 
-  private val defaultStatus = "pending"
+  private val defaultStatus = PaymentStatus.Pending
+
+  // Column stays plain `text` at the DB level (hardened by a CHECK constraint,
+  // not a native Postgres enum type - see V2__add_payment_status_check.sql);
+  // this eimap handles the Scala<->text mapping and surfaces a decode failure
+  // for any value outside the closed PaymentStatus set.
+  private val paymentStatus: Codec[PaymentStatus] =
+    text.eimap(PaymentStatus.fromString)(_.asString)
 
   def inMemory[F[_]: Sync]: F[PaymentStore[F]] =
     Ref.of[F, Map[String, Payment]](Map.empty).map { ref =>
@@ -50,7 +57,7 @@ object PaymentStore {
 
         def update(
             id: String,
-            status: String
+            status: PaymentStatus
         ): F[Option[Payment]] =
           for {
             now <- Sync[F].realTimeInstant
@@ -79,35 +86,35 @@ object PaymentStore {
     }
 
   private val insertPayment: skunk.Query[
-    (UUID, String, Int, String),
+    (UUID, String, Int, PaymentStatus),
     (OffsetDateTime, OffsetDateTime)
   ] =
     sql"""
       INSERT INTO "payment" (id, order_id, amount_cents, status)
-      VALUES ($uuid, $text, $int4, $text)
+      VALUES ($uuid, $text, $int4, $paymentStatus)
       RETURNING created_at, updated_at
     """.query(timestamptz *: timestamptz)
 
   private val selectPayment: skunk.Query[
     UUID,
-    (String, Int, String, OffsetDateTime, OffsetDateTime)
+    (String, Int, PaymentStatus, OffsetDateTime, OffsetDateTime)
   ] =
     sql"""
       SELECT order_id, amount_cents, status, created_at, updated_at
       FROM "payment"
       WHERE id = $uuid
-    """.query(text *: int4 *: text *: timestamptz *: timestamptz)
+    """.query(text *: int4 *: paymentStatus *: timestamptz *: timestamptz)
 
   private val updatePayment: skunk.Query[
-    (String, UUID),
-    (String, Int, String, OffsetDateTime, OffsetDateTime)
+    (PaymentStatus, UUID),
+    (String, Int, PaymentStatus, OffsetDateTime, OffsetDateTime)
   ] =
     sql"""
       UPDATE "payment"
-      SET status = $text, updated_at = now()
+      SET status = $paymentStatus, updated_at = now()
       WHERE id = $uuid
       RETURNING order_id, amount_cents, status, created_at, updated_at
-    """.query(text *: int4 *: text *: timestamptz *: timestamptz)
+    """.query(text *: int4 *: paymentStatus *: timestamptz *: timestamptz)
 
   private val deletePayment: skunk.Query[UUID, UUID] =
     sql"""
@@ -221,7 +228,7 @@ object PaymentStore {
 
               def update(
                   id: String,
-                  status: String
+                  status: PaymentStatus
               ): F[Option[Payment]] =
                 scala.util.Try(UUID.fromString(id)).toOption match {
                   case None       => Sync[F].pure(None)

@@ -103,7 +103,7 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-            updated <- store.update(created.id, "pending")
+            updated <- store.update(created.id, PaymentStatus.Pending)
           } yield {
             assertEquals(updated.map(_.id), Some(created.id))
             assert(
@@ -122,7 +122,7 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           store
-            .update(java.util.UUID.randomUUID().toString, "pending")
+            .update(java.util.UUID.randomUUID().toString, PaymentStatus.Pending)
             .map(assertEquals(_, None))
         }
     }
@@ -134,7 +134,7 @@ class PaymentStorePostgresSuite
       Migrations.run[IO](config) *> PaymentStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
-          store.update("not-a-uuid", "pending").map(assertEquals(_, None))
+          store.update("not-a-uuid", PaymentStatus.Pending).map(assertEquals(_, None))
         }
     }
   }
@@ -301,7 +301,7 @@ class PaymentStorePostgresSuite
             ready <- store.ping
             created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
             read1 <- store.get(created.id)
-            updated <- store.update(created.id, "pending")
+            updated <- store.update(created.id, PaymentStatus.Pending)
             read2 <- store.get(created.id)
             deleted <- store.delete(created.id)
             read3 <- store.get(created.id)
@@ -310,7 +310,7 @@ class PaymentStorePostgresSuite
             assertEquals(read1, Some(created))
             assertEquals(updated.map(_.orderId), Some("3fa85f64-5717-4562-b3fc-2c963f66afa6"))
             assertEquals(updated.map(_.amountCents), Some(4999))
-            assertEquals(updated.map(_.status), Some("pending"))
+            assertEquals(updated.map(_.status), Some(PaymentStatus.Pending))
             assertEquals(read2, updated)
             assert(deleted, "expected delete to report the entity existed")
             assertEquals(read3, None)

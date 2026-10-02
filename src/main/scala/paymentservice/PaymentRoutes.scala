@@ -42,7 +42,7 @@ object PaymentResponse {
       entity.id,
       entity.orderId,
       entity.amountCents,
-      entity.status,
+      entity.status.asString,
       entity.createdAt,
       entity.updatedAt
     )
@@ -68,12 +68,27 @@ object PaymentRoutes {
       .out(statusCode(StatusCode.Created))
       .out(jsonBody[PaymentResponse])
 
-  private val notFoundOutput: EndpointOutput[PaymentError] =
-    statusCode(StatusCode.NotFound)
-      .and(jsonBody[ErrorResponse])
-      .map[PaymentError](_ => PaymentNotFound)(_ =>
-        ErrorResponse("Payment not found")
-      )
+  private val notFoundVariant
+      : EndpointOutput.OneOfVariant[PaymentNotFound.type] =
+    oneOfVariant(
+      statusCode(StatusCode.NotFound)
+        .and(jsonBody[ErrorResponse])
+        .map[PaymentNotFound.type](_ => PaymentNotFound)(_ =>
+          ErrorResponse("Payment not found")
+        )
+    )
+
+  private val invalidStatusVariant: EndpointOutput.OneOfVariant[InvalidStatus] =
+    oneOfVariant(
+      statusCode(StatusCode.BadRequest)
+        .and(jsonBody[ErrorResponse])
+        .map[InvalidStatus](e => InvalidStatus(e.error))(e =>
+          ErrorResponse(s"Invalid payment status: '${e.raw}'")
+        )
+    )
+
+  private val paymentErrorOutput: EndpointOutput[PaymentError] =
+    oneOf[PaymentError](notFoundVariant, invalidStatusVariant)
 
   private val getPaymentEndpoint: PublicEndpoint[
     String,
@@ -84,7 +99,7 @@ object PaymentRoutes {
     endpoint.get
       .in("payments" / path[String]("id"))
       .out(jsonBody[PaymentResponse])
-      .errorOut(notFoundOutput)
+      .errorOut(paymentErrorOutput)
 
   private val updatePaymentEndpoint: PublicEndpoint[
     (String, UpdatePaymentRequest),
@@ -96,7 +111,7 @@ object PaymentRoutes {
       .in("payments" / path[String]("id"))
       .in(jsonBody[UpdatePaymentRequest])
       .out(jsonBody[PaymentResponse])
-      .errorOut(notFoundOutput)
+      .errorOut(paymentErrorOutput)
 
   private val replacePaymentEndpoint: PublicEndpoint[
     (String, UpdatePaymentRequest),
@@ -108,14 +123,14 @@ object PaymentRoutes {
       .in("payments" / path[String]("id"))
       .in(jsonBody[UpdatePaymentRequest])
       .out(jsonBody[PaymentResponse])
-      .errorOut(notFoundOutput)
+      .errorOut(paymentErrorOutput)
 
   private val deletePaymentEndpoint
       : PublicEndpoint[String, PaymentError, Unit, Any] =
     endpoint.delete
       .in("payments" / path[String]("id"))
       .out(statusCode(StatusCode.NoContent))
-      .errorOut(notFoundOutput)
+      .errorOut(paymentErrorOutput)
 
   def serverEndpoint[F[_]: Async](
       store: PaymentStore[F],
@@ -183,15 +198,24 @@ object PaymentRoutes {
           "payment_id" -> id
         )
       )("Received request")
-      result <- store.update(id, req.status).flatMap {
-        case Some(entity) =>
+      result <- PaymentStatus.fromString(req.status) match {
+        case Left(_) =>
           logger
-            .info(Map("payment_id" -> id))("Request completed")
-            .as(Right(PaymentResponse(entity)))
-        case None =>
-          logger
-            .warn(Map("payment_id" -> id))("Payment not found")
-            .as(Left(PaymentNotFound))
+            .warn(Map("payment_id" -> id, "status" -> req.status))(
+              "Invalid status"
+            )
+            .as(Left(InvalidStatus(req.status)))
+        case Right(status) =>
+          store.update(id, status).flatMap {
+            case Some(entity) =>
+              logger
+                .info(Map("payment_id" -> id))("Request completed")
+                .as(Right(PaymentResponse(entity)))
+            case None =>
+              logger
+                .warn(Map("payment_id" -> id))("Payment not found")
+                .as(Left(PaymentNotFound))
+          }
       }
     } yield result
 

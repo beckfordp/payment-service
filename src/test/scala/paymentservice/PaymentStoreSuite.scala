@@ -39,7 +39,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
     for {
       store <- PaymentStore.inMemory[IO]
       created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-      updated <- store.update(created.id, "pending")
+      updated <- store.update(created.id, PaymentStatus.Pending)
     } yield {
       assertEquals(updated.map(_.id), Some(created.id))
       assert(
@@ -52,7 +52,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("update returns None for an unknown id") {
     for {
       store <- PaymentStore.inMemory[IO]
-      result <- store.update("unknown-id", "pending")
+      result <- store.update("unknown-id", PaymentStatus.Pending)
     } yield assertEquals(result, None)
   }
 
