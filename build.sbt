@@ -12,6 +12,7 @@ val flywayVersion = "11.8.2"
 val postgresqlJdbcVersion = "42.7.13"
 val pureconfigVersion = "0.17.10"
 val testcontainersScalaVersion = "0.43.6"
+val fs2KafkaVersion = "3.6.0"
 // Pinned to match the purerestlib version this service is built against — see
 // README's "Consuming purerest as a dependency" section.
 val purerestlibVersion = "0.1.0"
@@ -57,6 +58,9 @@ lazy val root = project
     libraryDependencies ++= Seq(
       "io.github.beckfordp" %% "purerestlib" % purerestlibVersion,
       "org.typelevel" %% "cats-effect" % catsEffectVersion,
+      // fs2-kafka: pure-FP, FS2-native Kafka consumer/producer (US-6.1) -
+      // subscribes to order.reserved, publishes payment.settled/payment.failed.
+      "com.github.fd4s" %% "fs2-kafka" % fs2KafkaVersion,
       "org.http4s" %% "http4s-ember-server" % http4sVersion,
       "org.http4s" %% "http4s-dsl" % http4sVersion,
       "org.http4s" %% "http4s-circe" % http4sVersion,
@@ -81,9 +85,10 @@ lazy val root = project
       "org.scalameta" %% "munit" % munitVersion % Test,
       // munit-cats-effect: lets test bodies return IO[Unit] and run under munit directly.
       "org.typelevel" %% "munit-cats-effect" % munitCatsEffectVersion % Test,
-      // testcontainers-scala: spins up a real, ephemeral Postgres container for
-      // integration tests (not used by main code).
+      // testcontainers-scala: spins up a real, ephemeral Postgres/Kafka container
+      // for integration tests (not used by main code).
       "com.dimafeng" %% "testcontainers-scala-postgresql" % testcontainersScalaVersion % Test,
+      "com.dimafeng" %% "testcontainers-scala-kafka" % testcontainersScalaVersion % Test,
       "com.dimafeng" %% "testcontainers-scala-munit" % testcontainersScalaVersion % Test,
       // log4cats-testing: purerestlib keeps this Test-scoped (doesn't propagate to
       // consumers), so this service declares its own copy to assert on log output
