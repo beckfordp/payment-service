@@ -14,18 +14,19 @@ stories. It is the only service permitted to read or write the `payment`
 Postgres database (one-db-per-service).
 
 Generated via `pure-service-generator` (giter8 template over `purerest`),
-field-spec applied from `gluon/specs/payment.yaml`, not yet hand-extended
-per `gluon/backlogs/payment-service.md` (US-6.1/US-6.2 below are still
-backlog items, not yet implemented).
+field-spec applied from `gluon/specs/payment.yaml`, hand-extended per
+`gluon/backlogs/payment-service.md`: the `status` field hardened to a closed
+ADT (done); US-6.1/US-6.2 below remain backlog items, not yet implemented.
 
 ## Domain model
 - **Payment** — `orderId` (create-only, logical reference to order-service's
   `Order` — different service, different database, no real FK), `amountCents`
-  (create-only), `status` (server-defaulted `"pending"`; currently a raw
-  `String` — codegen v1 has no enum type, so the field-spec used `String` as
-  a stand-in. Flagged in the backlog to harden into a closed
-  `{pending, settled, failed}` ADT, the same way order-service hardened its
-  own `status` field), `createdAt`/`updatedAt`.
+  (create-only), `status` (server-defaulted `PaymentStatus.Pending`,
+  serialized as `"pending"`; hardened to a closed `PaymentStatus` ADT —
+  `Pending`/`Settled`/`Failed` — at both the Scala and DB level, mirroring
+  order-service's own `OrderStatus`: a `text.eimap`-based Skunk codec plus a
+  Postgres `CHECK` constraint (`payment_status_check`). PATCH/PUT reject any
+  other value with `400`), `createdAt`/`updatedAt`.
 - No other fields generated — the full CRUD surface (`POST`/`GET`/`PATCH`/
   `PUT`/`DELETE /payments{/id}`) matches the field-spec exactly; nothing
   codegen couldn't represent beyond the enum gap above.
