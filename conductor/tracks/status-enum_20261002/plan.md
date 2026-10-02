@@ -2,7 +2,7 @@
 
 ## Phase 1: Harden Payment.status to PaymentStatus ADT
 
-- [ ] Task: Add `PaymentStatus` sealed trait (Pending/Settled/Failed) with `fromString`/`asString` + unit tests
+- [x] Task: Add `PaymentStatus` sealed trait (Pending/Settled/Failed) with `fromString`/`asString` + unit tests `abf1c52`
 - [ ] Task: Add `InvalidStatus(raw)` case to `PaymentError`; wire a new errorOut mapping in `PaymentRoutes` (alongside the existing `notFoundOutput`)
 - [ ] Task: Add Flyway migration `V2__add_payment_status_check.sql` (CHECK constraint on status); verify it applies cleanly on top of V1
 - [ ] Task: Add Skunk `paymentStatus` eimap codec; update `Payment`, `PaymentStore` (in-memory + postgres) to use `PaymentStatus` instead of raw String
