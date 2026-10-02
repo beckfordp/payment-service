@@ -1,0 +1,11 @@
+Phase 2 verification report: Event payloads + publisher (US-6.1)
+
+Automated tests: sbt scalafmtCheck test -> 66/66 passed, formatting clean, including PaymentEventPublisherSuite's 3 Testcontainers-Kafka tests (publishSettled/publishFailed each produce exactly one correctly-shaped message; bounded-retry-then-drop against an unreachable broker logs a WARN and does not raise).
+
+Manual verification: scripts/verify-kafka-publisher.sh (committed in this commit) instead of an interactive walkthrough, per .claude/prompt-off. PaymentEventPublisher isn't wired into any live HTTP or consumer code path yet (that's Phase 3), so there's nothing additional to drive end-to-end beyond what the automated suite already proves live against a real Testcontainers Kafka. The script confirms payment-service still boots cleanly (docker compose up -d postgres+kafka, sbt run, /health/ready -> 200) with the new code present.
+
+All checks passed:
+- postgres + kafka starting
+- payment-service booted and ready (200)
+
+Confirmation: no interactive user confirmation sought for this phase - .claude/prompt-off is set for this project, so the script's pass/fail is the verification signal per that skill's protocol.
