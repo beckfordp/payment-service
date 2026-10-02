@@ -2,11 +2,11 @@
 
 ## Phase 1: Tech stack & infra
 
-- [ ] Task: Update `tech-stack.md` documenting fs2-kafka 3.6.0 + testcontainers-scala-kafka 0.43.6 as new dependencies (workflow.md requires this before implementation)
-- [ ] Task: Add `fs2-kafka`, `testcontainers-scala-kafka` to `build.sbt`
-- [ ] Task: Add a `kafka` service to `docker-compose.yml` (single-node KRaft broker, `apache/kafka:3.8.0`, mirroring inventory-service's block exactly)
-- [ ] Task: Add `kafka { bootstrap-servers = "localhost:9092" }` to `application.conf` + matching `KafkaConfig`/`PaymentServiceConfig` field, mirroring inventory-service's shape
-- [ ] Task: `sbt compile` confirms the new dependencies resolve cleanly
+- [x] Task: Update `tech-stack.md` documenting fs2-kafka 3.6.0 + testcontainers-scala-kafka 0.43.6 as new dependencies (workflow.md requires this before implementation) `9174865`
+- [x] Task: Add `fs2-kafka`, `testcontainers-scala-kafka` to `build.sbt` `6d6d677`
+- [x] Task: Add a `kafka` service to `docker-compose.yml` (single-node KRaft broker, `apache/kafka:3.8.0`, mirroring inventory-service's block exactly) `8814c05`
+- [x] Task: Add `kafka { bootstrap-servers = "localhost:9092" }` to `application.conf` + matching `KafkaConfig`/`PaymentServiceConfig` field, mirroring inventory-service's shape `8814c05`
+- [x] Task: `sbt compile` confirms the new dependencies resolve cleanly `6d6d677`
 - [ ] Task: Conductor - User Manual Verification 'Tech stack & infra' (Protocol in workflow.md) — `docker compose up -d` brings up postgres+kafka together, both healthy
 
 ## Phase 2: Event payloads + publisher
