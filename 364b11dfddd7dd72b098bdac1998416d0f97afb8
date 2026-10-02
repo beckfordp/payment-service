@@ -1,0 +1,17 @@
+Phase 3 verification report: order.reserved consumer (US-6.1, final)
+
+Automated tests: sbt scalafmtCheck test -> 69/69 passed, formatting clean, including OrderReservedConsumerSuite's 3 Testcontainers-Kafka tests (good event creates+settles a Payment and publishes payment.settled; malformed payload doesn't block later events; null-keyed record doesn't block later events). Coverage: 88.03% statement / 88.68% branch overall (sbt coverage test coverageReport), well above the 80% target.
+
+Manual verification: scripts/verify-order-reserved-consumer.sh (committed in this commit) instead of an interactive walkthrough, per .claude/prompt-off. Brings up Postgres + Kafka + the real service, publishes a synthetic order.reserved event directly onto the topic (stub/fan-out pattern, no live order-service needed), and confirms the real consumer creates+settles a Payment and produces the right payment.settled message, then double-checks the Payment record itself via GET /payments/{id}.
+
+All checks passed:
+- postgres + kafka starting
+- order.reserved topic pre-created
+- payment-service ready on :8080
+- payment.settled message has correct orderId
+- payment.settled message has correct amountCents
+- Payment status is settled
+
+Bug found and fixed during this phase (not part of the original plan): a null Kafka message key (e.g. a bare kafka-console-producer.sh call with no key set) crashed OrderReservedConsumer's entire background stream silently - Main.scala runs it via .background.use, which never surfaces a failed fiber, so the HTTP API stayed healthy while Kafka consumption was actually dead. Confirmed live against the real docker-compose broker before and after the fix (crashed before, clean after). Fixed via fs2-kafka's null-safe Deserializer.option for both key and value (commit b715893), with a new OrderReservedConsumerSuite test covering it. The same latent issue likely exists in order-service's StockEventConsumer (same ConsumerSettings[F, String, String] pattern) - out of scope for this track/repo, flagged to the user as a follow-up.
+
+Confirmation: no interactive user confirmation sought for this phase - .claude/prompt-off is set for this project, so the script's pass/fail is the verification signal per that skill's protocol.
