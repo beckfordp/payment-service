@@ -1,0 +1,14 @@
+Task: Add InvalidStatus(raw) case to PaymentError; wire errorOut mapping in PaymentRoutes / Add Skunk paymentStatus eimap codec, update Payment+PaymentStore / Update PaymentRoutes PATCH+PUT to parse via PaymentStatus.fromString / Add/extend tests
+
+Summary: Payment.status is now a PaymentStatus (closed ADT), threaded through PaymentStore's in-memory and Postgres implementations via a Skunk text.eimap codec (DB column stays TEXT, backed by the payment_status_check constraint added earlier). PaymentRoutes' PATCH/PUT parse the request's status via PaymentStatus.fromString before ever touching the store; an invalid value short-circuits to a new InvalidStatus error, mapped to 400 via a new oneOf-based paymentErrorOutput alongside the existing 404 notFoundVariant. PaymentResponse keeps serializing status as a plain String via asString - no wire format change. Added 4 new PaymentRoutesSuite tests (settled/failed accepted, PATCH and PUT reject an invalid status with nothing persisted, a WARN is logged) and fixed two pre-existing test stubs (HealthRoutesSuite, failingStore in PaymentRoutesSuite) whose PaymentStore implementations needed their update signature updated to compile.
+
+Files:
+- src/main/scala/paymentservice/PaymentError.scala
+- src/main/scala/paymentservice/PaymentStore.scala
+- src/main/scala/paymentservice/PaymentRoutes.scala
+- src/test/scala/paymentservice/HealthRoutesSuite.scala
+- src/test/scala/paymentservice/PaymentRoutesSuite.scala
+- src/test/scala/paymentservice/PaymentStoreSuite.scala
+- src/test/scala/paymentservice/PaymentStorePostgresSuite.scala
+
+Why: Final step of hardening Payment.status (track status-enum_20261002) - mirrors order-service's own equivalent commit (cdfefa5) exactly, including bundling these four plan.md tasks into one commit since they can't be tested independently once PaymentStore's signature changes.
