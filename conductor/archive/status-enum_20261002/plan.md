@@ -1,14 +1,14 @@
 # Implementation Plan: Harden Payment.status to PaymentStatus ADT
 
-## Phase 1: Harden Payment.status to PaymentStatus ADT [checkpoint: aab3636]
+## Phase 1: Harden Payment.status to PaymentStatus ADT [checkpoint: 9eefa5f]
 
-- [x] Task: Add `PaymentStatus` sealed trait (Pending/Settled/Failed) with `fromString`/`asString` + unit tests `abf1c52`
-- [x] Task: Add `InvalidStatus(raw)` case to `PaymentError`; wire a new errorOut mapping in `PaymentRoutes` (alongside the existing `notFoundOutput`) — combined with the two tasks below into one commit `ba12a44`
-- [x] Task: Add Flyway migration `V2__add_payment_status_check.sql` (CHECK constraint on status); verify it applies cleanly on top of V1 `631fde5`
-- [x] Task: Add Skunk `paymentStatus` eimap codec; update `Payment`, `PaymentStore` (in-memory + postgres) to use `PaymentStatus` instead of raw String `ba12a44`
-- [x] Task: Update `PaymentRoutes` PATCH/PUT to parse the request's status via `PaymentStatus.fromString`, short-circuiting invalid values to `InvalidStatus`; `PaymentResponse` keeps serializing status as a String via `asString` `ba12a44`
-- [x] Task: Add/extend tests — invalid-status PATCH/PUT returns 400 with nothing persisted; valid-status PATCH/PUT behaves exactly as before; `PaymentStatus.fromString`/`asString` round-trips `ba12a44`
-- [x] Task: Conductor - User Manual Verification 'Harden Payment.status to PaymentStatus ADT' (Protocol in workflow.md) `aab3636`
+- [x] Task: Add `PaymentStatus` sealed trait (Pending/Settled/Failed) with `fromString`/`asString` + unit tests `6302e0f`
+- [x] Task: Add `InvalidStatus(raw)` case to `PaymentError`; wire a new errorOut mapping in `PaymentRoutes` (alongside the existing `notFoundOutput`) — combined with the two tasks below into one commit `2b914b6`
+- [x] Task: Add Flyway migration `V2__add_payment_status_check.sql` (CHECK constraint on status); verify it applies cleanly on top of V1 `3698a72`
+- [x] Task: Add Skunk `paymentStatus` eimap codec; update `Payment`, `PaymentStore` (in-memory + postgres) to use `PaymentStatus` instead of raw String `2b914b6`
+- [x] Task: Update `PaymentRoutes` PATCH/PUT to parse the request's status via `PaymentStatus.fromString`, short-circuiting invalid values to `InvalidStatus`; `PaymentResponse` keeps serializing status as a String via `asString` `2b914b6`
+- [x] Task: Add/extend tests — invalid-status PATCH/PUT returns 400 with nothing persisted; valid-status PATCH/PUT behaves exactly as before; `PaymentStatus.fromString`/`asString` round-trips `2b914b6`
+- [x] Task: Conductor - User Manual Verification 'Harden Payment.status to PaymentStatus ADT' (Protocol in workflow.md) `9eefa5f`
 
 Each task follows the standard TDD lifecycle from workflow.md (failing test
 → implement → refactor → commit → git note) during `/conductor:implement`.
