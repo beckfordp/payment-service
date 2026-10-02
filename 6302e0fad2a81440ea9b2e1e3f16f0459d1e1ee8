@@ -1,0 +1,9 @@
+Task: Add PaymentStatus sealed trait with fromString/asString + unit tests
+
+Summary: Introduced PaymentStatus as a closed sealed-trait ADT (Pending, Settled, Failed), matching PaymentError's existing ADT style and mirroring order-service's OrderStatus exactly. fromString parses a raw String into Either[String, PaymentStatus]; asString serializes back to the same lowercase wire strings used today ("pending"/"settled"/"failed").
+
+Files:
+- src/main/scala/paymentservice/PaymentStatus.scala (new)
+- src/test/scala/paymentservice/PaymentStatusSuite.scala (new)
+
+Why: First step of hardening Payment.status from a raw String to a closed type (track status-enum_20261002), per gluon/backlogs/payment-service.md — codegen v1 has no enum type, so the field-spec used String as a stand-in.
