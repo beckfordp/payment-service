@@ -17,7 +17,7 @@
 - [x] Task: Run tests, confirm green — 66 passed, 0 failed `271d554`
 - [x] Task: Conductor - User Manual Verification 'Event payloads + publisher' (Protocol in workflow.md) `56238c0`
 
-## Phase 3: order.reserved consumer (the actual US-6.1 behavior)
+## Phase 3: order.reserved consumer (the actual US-6.1 behavior) [checkpoint: 364b11d]
 
 - [x] Task: Add local `OrderReservedEvent(orderId, customerId, totalCents, timestamp)` case class mirroring order-service's pinned `order.reserved` payload, no shared library `42b5543`
 - [x] Task: Write a failing Testcontainers-Kafka test: publish a synthetic `order.reserved` event, assert a `Payment` is created and settled, and `payment.settled` is published with the correct `orderId`/`paymentId`/`amountCents` `42b5543`
@@ -26,7 +26,8 @@
 - [x] Task: Add tests — malformed payload is logged and skipped without crashing the stream; `PaymentEventPublisher.publishFailed` covered directly (forcing the failure path, since the real flow never produces it this track); a publish failure that exhausts the bounded retry is logged loudly and doesn't crash the consumer (tested against a producer that always fails) `42b5543` (the latter two already covered by Phase 2's `PaymentEventPublisherSuite`)
 - [x] Task: Run tests, confirm green — 68 passed, 0 failed `42b5543`
 - [x] Task: Verify coverage (`sbt coverage test coverageReport`, target >80% on new code) — 88.03% statement / 88.68% branch overall
-- [ ] Task: Conductor - User Manual Verification 'order.reserved consumer' (final, Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'order.reserved consumer' (final, Protocol in workflow.md) `364b11d`
+- [x] Task (unplanned, found during manual verification): fix a null-Kafka-key crash in `OrderReservedConsumer` — a bare `kafka-console-producer.sh` call (no key set) killed the whole background consumer stream silently; fixed via fs2-kafka's null-safe `Deserializer.option` for both key and value, with a new test covering it `b715893`
 
 Three phases, each independently testable before the next builds on it —
 Phase 1 is pure infra addition, Phase 2 is the publish side in isolation
