@@ -2,7 +2,7 @@
 
 This file tracks all major tracks for the project.
 
-- [ ] **Track: US-6.1: consume order.reserved, charge, publish payment.settled / payment.failed**
+- [x] **Track: US-6.1: consume order.reserved, charge, publish payment.settled / payment.failed**
   *Link: [./tracks/order-reserved-consumer_20261002/](./tracks/order-reserved-consumer_20261002/)*
 
 ---
