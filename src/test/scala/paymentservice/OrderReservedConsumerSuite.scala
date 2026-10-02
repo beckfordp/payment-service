@@ -34,6 +34,28 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
       .use(_.produceOne_(ProducerRecord(topic, key, json)).flatten.void)
   }
 
+  /** Sends a record with a genuinely null key, bypassing fs2-kafka's typed
+    * `String` serializer (which itself throws on a null key before ever
+    * reaching the broker) - exactly what a real external producer (or a raw
+    * `kafka-console-producer.sh` invocation with no key set) can send.
+    */
+  private def produceNullKey(
+      config: KafkaConfig,
+      topic: String,
+      value: String
+  ): IO[Unit] = {
+    val producerSettings =
+      ProducerSettings[IO, Array[Byte], Array[Byte]]
+        .withBootstrapServers(config.bootstrapServers)
+    KafkaProducer
+      .resource(producerSettings)
+      .use(
+        _.produceOne_(
+          ProducerRecord(topic, null, value.getBytes("UTF-8"))
+        ).flatten.void
+      )
+  }
+
   private def consumeOne(config: KafkaConfig, topic: String): IO[String] = {
     val consumerSettings =
       ConsumerSettings[IO, String, String]
@@ -142,6 +164,49 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
       } yield assert(
         raced.isRight,
         s"expected the good event to still produce a payment.settled message despite the earlier malformed one, got: $raced"
+      )
+    }
+  }
+
+  test(
+    "a null-keyed order.reserved record doesn't crash the stream, and a later event is still processed"
+  ) {
+    withContainers { kafka =>
+      val config = configFor(kafka)
+      val goodEvent = OrderReservedEvent(
+        orderId = "order-3",
+        customerId = "cust-3",
+        totalCents = 2500,
+        timestamp = Instant.parse("2026-01-01T00:00:00Z")
+      )
+      for {
+        store <- PaymentStore.inMemory[IO]
+        raced <- PaymentEventPublisher.resource[IO](config, NoOpLogger[IO]).use {
+          publisher =>
+            for {
+              _ <- produceNullKey(
+                config,
+                OrderReservedConsumer.topic,
+                "{\"irrelevant\":\"null-key record\"}"
+              )
+              _ <- produce(
+                config,
+                OrderReservedConsumer.topic,
+                goodEvent.orderId,
+                goodEvent.asJson.noSpaces
+              )
+              raced <- IO.race(
+                OrderReservedConsumer
+                  .run[IO](config, store, publisher, NoOpLogger[IO])
+                  .compile
+                  .drain,
+                consumeOne(config, PaymentEventPublisher.settledTopic)
+              )
+            } yield raced
+        }
+      } yield assert(
+        raced.isRight,
+        s"expected the good event to still produce a payment.settled message despite the earlier null-keyed one, got: $raced"
       )
     }
   }

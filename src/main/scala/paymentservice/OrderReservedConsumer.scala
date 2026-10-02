@@ -41,10 +41,17 @@ object OrderReservedConsumer {
 
   val topic: String = "order.reserved"
 
+  // Key/value typed as Option[String] (via fs2-kafka's null-safe
+  // Deserializer.option) rather than plain String: a plain String
+  // deserializer throws on a null key or value - e.g. a producer that sends
+  // no key (confirmed live against a real broker with a bare
+  // kafka-console-producer.sh call) - which kills this whole background
+  // consumer stream silently, since Main.scala runs it via `.background.use`
+  // and never observes the fiber's outcome.
   private def consumerSettings[F[_]: Async](
       config: KafkaConfig
-  ): ConsumerSettings[F, String, String] =
-    ConsumerSettings[F, String, String]
+  ): ConsumerSettings[F, Option[String], Option[String]] =
+    ConsumerSettings[F, Option[String], Option[String]]
       .withBootstrapServers(config.bootstrapServers)
       .withGroupId("payment-service-order-reserved")
       .withAutoOffsetReset(AutoOffsetReset.Earliest)
@@ -60,46 +67,54 @@ object OrderReservedConsumer {
       .subscribeTo(topic)
       .records
       .evalMap { committable =>
-        val handled: F[Unit] =
-          decode[OrderReservedEvent](committable.record.value) match {
-            case Left(error) =>
-              logger.error(
-                Map("raw" -> committable.record.value),
-                error
-              )("Failed to decode order.reserved")
-            case Right(event) =>
-              for {
-                payment <- store.create(event.orderId, event.totalCents)
-                settled <- store.update(payment.id, PaymentStatus.Settled)
-                _ <- settled match {
-                  case Some(settledPayment) =>
-                    logger.info(
-                      Map(
-                        "order_id" -> event.orderId,
-                        "payment_id" -> settledPayment.id
-                      )
-                    )(
-                      "Payment created and settled from order.reserved event"
-                    ) *> publisher.publishSettled(
-                      PaymentSettledEvent(
-                        orderId = event.orderId,
-                        paymentId = settledPayment.id,
-                        amountCents = settledPayment.amountCents,
-                        timestamp = settledPayment.updatedAt
-                      )
-                    )
-                  case None =>
-                    logger.error(
-                      Map(
-                        "order_id" -> event.orderId,
-                        "payment_id" -> payment.id
-                      )
-                    )(
-                      "Payment vanished between create and settle - this should never happen"
-                    )
-                }
-              } yield ()
-          }
+        def handleEvent(event: OrderReservedEvent): F[Unit] =
+          for {
+            payment <- store.create(event.orderId, event.totalCents)
+            settled <- store.update(payment.id, PaymentStatus.Settled)
+            _ <- settled match {
+              case Some(settledPayment) =>
+                logger.info(
+                  Map(
+                    "order_id" -> event.orderId,
+                    "payment_id" -> settledPayment.id
+                  )
+                )(
+                  "Payment created and settled from order.reserved event"
+                ) *> publisher.publishSettled(
+                  PaymentSettledEvent(
+                    orderId = event.orderId,
+                    paymentId = settledPayment.id,
+                    amountCents = settledPayment.amountCents,
+                    timestamp = settledPayment.updatedAt
+                  )
+                )
+              case None =>
+                logger.error(
+                  Map(
+                    "order_id" -> event.orderId,
+                    "payment_id" -> payment.id
+                  )
+                )(
+                  "Payment vanished between create and settle - this should never happen"
+                )
+            }
+          } yield ()
+
+        val handled: F[Unit] = committable.record.value match {
+          case None =>
+            logger.error(Map.empty)(
+              "Received order.reserved record with a null value - skipping"
+            )
+          case Some(raw) =>
+            decode[OrderReservedEvent](raw) match {
+              case Left(error) =>
+                logger.error(
+                  Map("raw" -> raw),
+                  error
+                )("Failed to decode order.reserved")
+              case Right(event) => handleEvent(event)
+            }
+        }
         handled *> committable.offset.commit
       }
 }
