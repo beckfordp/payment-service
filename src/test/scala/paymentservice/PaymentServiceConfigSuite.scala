@@ -18,6 +18,9 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
       |  user = "payment"
       |  password = "payment"
       |}
+      |kafka {
+      |  bootstrap-servers = "localhost:9092"
+      |}
       |""".stripMargin
 
   test("loads a fully-specified config") {
@@ -36,7 +39,8 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
             database = "payment",
             user = "payment",
             password = "payment"
-          )
+          ),
+          kafka = KafkaConfig(bootstrapServers = "localhost:9092")
         )
       )
     )
@@ -77,6 +81,10 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
           "payment",
           "payment"
         )
+      )
+      assertEquals(
+        config.kafka,
+        KafkaConfig(bootstrapServers = "localhost:9092")
       )
     }
   }

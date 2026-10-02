@@ -11,11 +11,16 @@ final case class PostgresConfig(
     password: String
 ) derives ConfigReader
 
+final case class KafkaConfig(
+    bootstrapServers: String
+) derives ConfigReader
+
 final case class PaymentServiceConfig(
     port: Int,
     metricsPort: Int,
     serviceName: String,
-    postgres: PostgresConfig
+    postgres: PostgresConfig,
+    kafka: KafkaConfig
 ) derives ConfigReader
 
 object PaymentServiceConfig {
