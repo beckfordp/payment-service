@@ -9,6 +9,13 @@
 - http4s 0.23.37 (ember-server)
 - circe 0.14.16
 
+## Messaging
+- fs2-kafka 3.6.0 — `order.reserved` consumer + `payment.settled`/
+  `payment.failed` producer, matching inventory-service's (US-5.1) and
+  order-service's (US-5.2) choice. Plain `String` key/value, hand-rolled
+  circe JSON (no circe-kafka serializer layer) — same convention already
+  established cross-repo.
+
 ## API layer
 - tapir 1.11.25 — route definitions and generated Swagger/OpenAPI docs
   (`purerest.docs.Docs`), served at `/docs`, kept in sync by construction
@@ -32,19 +39,17 @@
 ## Testing
 - munit 1.3.6 + munit-cats-effect 2.2.1
 - log4cats-testing 2.8.0 — assert on structured log output
-- testcontainers-scala 0.43.6 (postgresql + munit modules) — real, ephemeral
-  Postgres for integration tests, no manual local setup
+- testcontainers-scala 0.43.6 (postgresql + kafka + munit modules) — real,
+  ephemeral Postgres/Kafka for integration tests, no manual local setup
 - scalafmt (default Scala 3 style) — `sbt scalafmtCheck test` run in CI
 
 ## Packaging / local deploy
 - sbt-native-packager (`JavaAppPackaging`, `DockerPlugin`)
 - Docker image: `eclipse-temurin:21-jre`
-- Docker Compose — local Postgres
+- Docker Compose — local Postgres + Kafka (single-node KRaft broker,
+  `apache/kafka:3.8.0`, matching inventory-service's docker-compose.yml)
 
 ## Not yet in `build.sbt` (needed for upcoming backlog items)
-- Kafka client (fs2-kafka, matching inventory-service's US-5.1 choice) — for
-  US-6.1 (consume `order.reserved`, publish `payment.settled` /
-  `payment.failed`)
 - Redis client — for US-6.2 (idempotency keys to avoid double-charging on
   retry/redelivery)
 
