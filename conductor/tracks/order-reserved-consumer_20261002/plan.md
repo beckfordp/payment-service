@@ -9,13 +9,13 @@
 - [x] Task: `sbt compile` confirms the new dependencies resolve cleanly `6d6d677`
 - [x] Task: Conductor - User Manual Verification 'Tech stack & infra' (Protocol in workflow.md) — `docker compose up -d` brings up postgres+kafka together, both healthy `a5efb25`
 
-## Phase 2: Event payloads + publisher
+## Phase 2: Event payloads + publisher [checkpoint: 56238c0]
 
 - [x] Task: Write a failing integration test (Testcontainers Kafka) asserting a publish call produces exactly one JSON message with the correct fields on the right topic `271d554`
 - [x] Task: Define `PaymentSettledEvent(orderId, paymentId, amountCents, timestamp)` / `PaymentFailedEvent` (same shape) case classes + circe codecs; pin this shape in `gluon/docs/system-design.md`'s payload-contracts section (cross-repo doc, not just this repo) `271d554` (gluon docs: `774df58`, bundled into a concurrent session's commit — content verified intact)
 - [x] Task: Implement `PaymentEventPublisher` (fs2-kafka `KafkaProducer`-backed) with `publishSettled`/`publishFailed`, keyed by `orderId`, each publish wrapped in a hand-rolled cats-retry bounded retry (NOT `purerest.resilience` — confirmed `Client[F]`-only) that logs loudly and drops on exhaustion; add a `noOp` instance for tests that don't care about Kafka `271d554`. **Deviation discovered during implementation:** also had to set the Kafka producer's own `max.block.ms`/`request.timeout.ms`/`delivery.timeout.ms` to `publishTimeout` — the client's 60s defaults block far longer than a cats-effect `.timeout()` can actually interrupt, so without this the bounded-retry test against an unreachable broker took 30s+ per attempt instead of ~2s
 - [x] Task: Run tests, confirm green — 66 passed, 0 failed `271d554`
-- [ ] Task: Conductor - User Manual Verification 'Event payloads + publisher' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Event payloads + publisher' (Protocol in workflow.md) `56238c0`
 
 ## Phase 3: order.reserved consumer (the actual US-6.1 behavior)
 
