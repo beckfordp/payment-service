@@ -67,8 +67,9 @@ object Main extends IOApp.Simple {
                           )
                           val tracedRoutes =
                             ServerTracing.middleware(tracer)(docsRoutes)
-                          val routes =
+                          val meteredRoutes =
                             ServerMetrics.middleware[IO](meter)(tracedRoutes)
+                          val routes = Cors.middleware[IO](meteredRoutes)
                           EmberServerBuilder
                             .default[IO]
                             .withHost(host"0.0.0.0")
