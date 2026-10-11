@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verifies US-6.1 (track order-reserved-consumer_20261002) end-to-end: brings
-# up Postgres + Kafka + the real service, publishes a synthetic order.reserved
-# event directly onto the topic (no live order-service needed, per the
+# Verifies US-6.1 (track order-reserved-consumer_20261002; topic/envelope
+# migrated by kafka-envelope_20261011 per ADR 0009) end-to-end: brings up
+# Postgres + Kafka + the real service, publishes a synthetic OrderReserved
+# envelope directly onto order-events (no live order-service needed, per the
 # stub/fan-out pattern), and confirms the real consumer creates+settles a
-# Payment and produces the right payment.settled message - not just that the
-# unit/integration test suite passes.
+# Payment and produces the right PaymentSettled envelope on payment-events -
+# not just that the unit/integration test suite passes.
 #
 # Usage: ./scripts/verify-order-reserved-consumer.sh
 
@@ -51,16 +52,33 @@ produce_one() {
     --topic "$topic" >/dev/null 2>&1
 }
 
-# Consumes up to one message from a topic, printing it (empty if none within
-# the timeout). Runs the broker's own console consumer inside the container.
-consume_one() {
-  local topic="$1"
+# Consumes a batch from a topic and prints the `payload` of the first
+# envelope matching the given eventType (empty if none within the timeout) -
+# the topic now carries every event type for the domain (ADR 0009), not just
+# this one. Runs the broker's own console consumer inside the container.
+consume_envelope_payload() {
+  local topic="$1" event_type="$2"
   docker compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh \
     --bootstrap-server localhost:9092 \
     --topic "$topic" \
     --from-beginning \
-    --max-messages 1 \
-    --timeout-ms 15000 2>/dev/null || true
+    --max-messages 5 \
+    --timeout-ms 15000 2>/dev/null \
+    | python3 -c "
+import json, sys
+target = sys.argv[1]
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        envelope = json.loads(line)
+    except ValueError:
+        continue
+    if envelope.get('eventType') == target:
+        print(json.dumps(envelope['payload']))
+        break
+" "$event_type" || true
 }
 
 echo "1. docker compose up -d (fresh volumes)..."
@@ -69,17 +87,17 @@ docker compose up -d
 echo "   OK: postgres + kafka starting"
 
 echo
-echo "2. Pre-create order.reserved (avoids a cold-subscription race: the"
+echo "2. Pre-create order-events (avoids a cold-subscription race: the"
 echo "   consumer subscribes at startup, and auto-created-by-producer topics"
 echo "   aren't always picked up by an already-subscribed consumer in time)..."
 for _ in $(seq 1 30); do
   docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
     --bootstrap-server localhost:9092 --create --if-not-exists \
-    --topic order.reserved --partitions 1 --replication-factor 1 \
+    --topic order-events --partitions 1 --replication-factor 1 \
     >/dev/null 2>&1 && break
   sleep 1
 done
-echo "   OK: order.reserved topic created"
+echo "   OK: order-events topic created"
 
 echo
 echo "3. Starting payment-service (sbt run) in the background..."
@@ -93,16 +111,34 @@ wait_ready
 echo "   OK: payment-service ready on :8080"
 
 echo
-echo "4. Publish a synthetic order.reserved event and confirm payment.settled..."
+echo "4. Publish a synthetic OrderReserved envelope and confirm a PaymentSettled envelope..."
 order_id="verify-order-$(date +%s)"
-produce_one order.reserved "{\"orderId\":\"${order_id}\",\"customerId\":\"cust-verify\",\"totalCents\":4999,\"timestamp\":\"2026-01-01T00:00:00Z\"}"
-settled_message="$(consume_one payment.settled)"
-echo "   message: ${settled_message:-<none>}"
+envelope_json="$(python3 -c "
+import json, uuid, sys
+order_id = sys.argv[1]
+envelope = {
+    'eventId': str(uuid.uuid4()),
+    'eventType': 'OrderReserved',
+    'timestamp': '2026-01-01T00:00:00Z',
+    'source': 'order-service',
+    'correlationId': order_id,
+    'payload': {
+        'orderId': order_id,
+        'customerId': 'cust-verify',
+        'totalCents': 4999,
+        'timestamp': '2026-01-01T00:00:00Z',
+    },
+}
+print(json.dumps(envelope))
+" "$order_id")"
+produce_one order-events "$envelope_json"
+settled_message="$(consume_envelope_payload payment-events PaymentSettled)"
+echo "   payload: ${settled_message:-<none>}"
 settled_order_id="$(echo "$settled_message" | python3 -c "import json,sys; print(json.load(sys.stdin).get('orderId',''))" 2>/dev/null || echo "")"
 settled_amount="$(echo "$settled_message" | python3 -c "import json,sys; print(json.load(sys.stdin).get('amountCents',''))" 2>/dev/null || echo "")"
 payment_id="$(echo "$settled_message" | python3 -c "import json,sys; print(json.load(sys.stdin).get('paymentId',''))" 2>/dev/null || echo "")"
-check "payment.settled message has correct orderId" "$order_id" "$settled_order_id"
-check "payment.settled message has correct amountCents" "4999" "$settled_amount"
+check "PaymentSettled payload has correct orderId" "$order_id" "$settled_order_id"
+check "PaymentSettled payload has correct amountCents" "4999" "$settled_amount"
 
 echo
 echo "5. Confirm the Payment record itself via GET /payments/{id}..."
