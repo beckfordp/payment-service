@@ -2,6 +2,9 @@
 
 This file tracks all major tracks for the project.
 
+- [~] **Track: Migrate to order-events/payment-events topics with envelope**
+  *Link: [./tracks/kafka-envelope_20261011/](./tracks/kafka-envelope_20261011/)*
+
 ---
 
 ## Backlog

@@ -21,7 +21,16 @@ class PaymentEventPublisherSuite extends CatsEffectSuite with TestContainerForAl
   private def configFor(kafka: KafkaContainer): KafkaConfig =
     KafkaConfig(bootstrapServers = kafka.bootstrapServers)
 
-  private def consumeOne(config: KafkaConfig, topic: String): IO[String] = {
+  /** All event types now share one `payment-events` topic (ADR 0009), so a
+    * fresh "earliest" consumer can see another test's leftover message
+    * first — filter for the envelope matching this test's own
+    * `correlationId` rather than just taking the first record.
+    */
+  private def consumeEnvelope(
+      config: KafkaConfig,
+      topic: String,
+      correlationId: String
+  ): IO[String] = {
     val consumerSettings =
       ConsumerSettings[IO, String, String]
         .withBootstrapServers(config.bootstrapServers)
@@ -32,21 +41,27 @@ class PaymentEventPublisherSuite extends CatsEffectSuite with TestContainerForAl
       for {
         _ <- consumer.subscribeTo(topic)
         record <- consumer.stream
+          .map(_.record.value)
+          .filter(raw =>
+            decode[EventEnvelope](raw).exists(
+              _.correlationId == correlationId
+            )
+          )
           .take(1)
           .compile
           .lastOrError
           .timeout(15.seconds)
-      } yield record.record.value
+      } yield record
     }
   }
 
   test(
-    "publishSettled produces exactly one message on payment.settled"
+    "publishSettled produces one message on payment-events, wrapped in an envelope"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
       val event = PaymentSettledEvent(
-        orderId = "order-1",
+        orderId = "order-settled-1",
         paymentId = "payment-1",
         amountCents = 4999,
         timestamp = Instant.parse("2026-01-01T00:00:00Z")
@@ -54,21 +69,29 @@ class PaymentEventPublisherSuite extends CatsEffectSuite with TestContainerForAl
       for {
         consumed <- PaymentEventPublisher
           .resource[IO](config, NoOpLogger[IO])
-          .use(_.publishSettled(event)) *> consumeOne(
+          .use(_.publishSettled(event)) *> consumeEnvelope(
           config,
-          PaymentEventPublisher.settledTopic
+          PaymentEventPublisher.topic,
+          event.orderId
         )
-      } yield assertEquals(decode[PaymentSettledEvent](consumed), Right(event))
+        envelope = decode[EventEnvelope](consumed).toOption.get
+      } yield {
+        assertEquals(envelope.eventType, "PaymentSettled")
+        assertEquals(envelope.source, "payment-service")
+        assertEquals(envelope.correlationId, "order-settled-1")
+        assert(envelope.eventId.nonEmpty)
+        assertEquals(envelope.payload.as[PaymentSettledEvent], Right(event))
+      }
     }
   }
 
   test(
-    "publishFailed produces exactly one message on payment.failed"
+    "publishFailed produces one message on payment-events, wrapped in an envelope"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
       val event = PaymentFailedEvent(
-        orderId = "order-1",
+        orderId = "order-failed-1",
         paymentId = "payment-1",
         amountCents = 4999,
         timestamp = Instant.parse("2026-01-01T00:00:00Z")
@@ -76,11 +99,19 @@ class PaymentEventPublisherSuite extends CatsEffectSuite with TestContainerForAl
       for {
         consumed <- PaymentEventPublisher
           .resource[IO](config, NoOpLogger[IO])
-          .use(_.publishFailed(event)) *> consumeOne(
+          .use(_.publishFailed(event)) *> consumeEnvelope(
           config,
-          PaymentEventPublisher.failedTopic
+          PaymentEventPublisher.topic,
+          event.orderId
         )
-      } yield assertEquals(decode[PaymentFailedEvent](consumed), Right(event))
+        envelope = decode[EventEnvelope](consumed).toOption.get
+      } yield {
+        assertEquals(envelope.eventType, "PaymentFailed")
+        assertEquals(envelope.source, "payment-service")
+        assertEquals(envelope.correlationId, "order-failed-1")
+        assert(envelope.eventId.nonEmpty)
+        assertEquals(envelope.payload.as[PaymentFailedEvent], Right(event))
+      }
     }
   }
 

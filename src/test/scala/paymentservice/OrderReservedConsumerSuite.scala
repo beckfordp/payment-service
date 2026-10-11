@@ -4,6 +4,7 @@ import cats.effect.IO
 import com.dimafeng.testcontainers.KafkaContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
 import fs2.kafka._
+import io.circe.Json
 import io.circe.parser.decode
 import io.circe.syntax._
 import munit.CatsEffectSuite
@@ -56,6 +57,20 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
       )
   }
 
+  private def envelopeJson(
+      eventType: String,
+      correlationId: String,
+      payload: Json
+  ): String =
+    EventEnvelope(
+      eventId = UUID.randomUUID().toString,
+      eventType = eventType,
+      timestamp = Instant.parse("2026-01-01T00:00:00Z"),
+      source = "order-service",
+      correlationId = correlationId,
+      payload = payload
+    ).asJson.noSpaces
+
   private def consumeOne(config: KafkaConfig, topic: String): IO[String] = {
     val consumerSettings =
       ConsumerSettings[IO, String, String]
@@ -76,7 +91,7 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
   }
 
   test(
-    "a synthetic order.reserved event creates a settled Payment and publishes payment.settled"
+    "a synthetic OrderReserved envelope creates a settled Payment and publishes PaymentSettled"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
@@ -95,14 +110,14 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
                 config,
                 OrderReservedConsumer.topic,
                 event.orderId,
-                event.asJson.noSpaces
+                envelopeJson("OrderReserved", event.orderId, event.asJson)
               )
               raced <- IO.race(
                 OrderReservedConsumer
                   .run[IO](config, store, publisher, NoOpLogger[IO])
                   .compile
                   .drain,
-                consumeOne(config, PaymentEventPublisher.settledTopic)
+                consumeOne(config, PaymentEventPublisher.topic)
               )
             } yield raced
         }
@@ -110,12 +125,16 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
           case Right(json) => json
           case Left(_) =>
             fail(
-              "consumer stream completed before a payment.settled message arrived"
+              "consumer stream completed before a PaymentSettled message arrived"
             )
         }
-        settledEvent <- IO.fromEither(decode[PaymentSettledEvent](settledJson))
+        settledEnvelope <- IO.fromEither(decode[EventEnvelope](settledJson))
+        settledEvent <- IO.fromEither(
+          settledEnvelope.payload.as[PaymentSettledEvent]
+        )
         stored <- store.get(settledEvent.paymentId)
       } yield {
+        assertEquals(settledEnvelope.eventType, "PaymentSettled")
         assertEquals(settledEvent.orderId, event.orderId)
         assertEquals(settledEvent.amountCents, event.totalCents)
         assertEquals(stored.map(_.status), Some(PaymentStatus.Settled))
@@ -125,7 +144,64 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
   }
 
   test(
-    "a malformed order.reserved payload is logged and doesn't block later events"
+    "an envelope with a different eventType on order-events is ignored, not treated as malformed"
+  ) {
+    withContainers { kafka =>
+      val config = configFor(kafka)
+      val goodEvent = OrderReservedEvent(
+        orderId = "order-ignore-1",
+        customerId = "cust-ignore",
+        totalCents = 1200,
+        timestamp = Instant.parse("2026-01-01T00:00:00Z")
+      )
+      for {
+        store <- PaymentStore.inMemory[IO]
+        raced <- PaymentEventPublisher.resource[IO](config, NoOpLogger[IO]).use {
+          publisher =>
+            for {
+              _ <- produce(
+                config,
+                OrderReservedConsumer.topic,
+                "order-other-1",
+                envelopeJson(
+                  "OrderStatusChanged",
+                  "order-other-1",
+                  Json.obj(
+                    "orderId" -> Json.fromString("order-other-1"),
+                    "customerId" -> Json.fromString("cust-x"),
+                    "status" -> Json.fromString("confirmed"),
+                    "timestamp" -> Json.fromString("2026-01-01T00:00:00Z")
+                  )
+                )
+              )
+              _ <- produce(
+                config,
+                OrderReservedConsumer.topic,
+                goodEvent.orderId,
+                envelopeJson(
+                  "OrderReserved",
+                  goodEvent.orderId,
+                  goodEvent.asJson
+                )
+              )
+              raced <- IO.race(
+                OrderReservedConsumer
+                  .run[IO](config, store, publisher, NoOpLogger[IO])
+                  .compile
+                  .drain,
+                consumeOne(config, PaymentEventPublisher.topic)
+              )
+            } yield raced
+        }
+      } yield assert(
+        raced.isRight,
+        s"expected the OrderReserved event to still produce a PaymentSettled message despite the earlier differently-typed one, got: $raced"
+      )
+    }
+  }
+
+  test(
+    "a malformed envelope is logged and doesn't block later events"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
@@ -150,26 +226,30 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
                 config,
                 OrderReservedConsumer.topic,
                 goodEvent.orderId,
-                goodEvent.asJson.noSpaces
+                envelopeJson(
+                  "OrderReserved",
+                  goodEvent.orderId,
+                  goodEvent.asJson
+                )
               )
               raced <- IO.race(
                 OrderReservedConsumer
                   .run[IO](config, store, publisher, NoOpLogger[IO])
                   .compile
                   .drain,
-                consumeOne(config, PaymentEventPublisher.settledTopic)
+                consumeOne(config, PaymentEventPublisher.topic)
               )
             } yield raced
         }
       } yield assert(
         raced.isRight,
-        s"expected the good event to still produce a payment.settled message despite the earlier malformed one, got: $raced"
+        s"expected the good event to still produce a PaymentSettled message despite the earlier malformed one, got: $raced"
       )
     }
   }
 
   test(
-    "a null-keyed order.reserved record doesn't crash the stream, and a later event is still processed"
+    "a null-keyed record on order-events doesn't crash the stream, and a later event is still processed"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
@@ -193,20 +273,24 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
                 config,
                 OrderReservedConsumer.topic,
                 goodEvent.orderId,
-                goodEvent.asJson.noSpaces
+                envelopeJson(
+                  "OrderReserved",
+                  goodEvent.orderId,
+                  goodEvent.asJson
+                )
               )
               raced <- IO.race(
                 OrderReservedConsumer
                   .run[IO](config, store, publisher, NoOpLogger[IO])
                   .compile
                   .drain,
-                consumeOne(config, PaymentEventPublisher.settledTopic)
+                consumeOne(config, PaymentEventPublisher.topic)
               )
             } yield raced
         }
       } yield assert(
         raced.isRight,
-        s"expected the good event to still produce a payment.settled message despite the earlier null-keyed one, got: $raced"
+        s"expected the good event to still produce a PaymentSettled message despite the earlier null-keyed one, got: $raced"
       )
     }
   }
