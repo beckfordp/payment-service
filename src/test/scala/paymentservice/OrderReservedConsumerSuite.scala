@@ -14,7 +14,9 @@ import java.time.Instant
 import java.util.UUID
 import scala.concurrent.duration._
 
-class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAll {
+class OrderReservedConsumerSuite
+    extends CatsEffectSuite
+    with TestContainerForAll {
 
   override val containerDef: KafkaContainer.Def = KafkaContainer.Def()
 
@@ -103,8 +105,9 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
       )
       for {
         store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher.resource[IO](config, NoOpLogger[IO]).use {
-          publisher =>
+        raced <- PaymentEventPublisher
+          .resource[IO](config, NoOpLogger[IO])
+          .use { publisher =>
             for {
               _ <- produce(
                 config,
@@ -120,10 +123,10 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
                 consumeOne(config, PaymentEventPublisher.topic)
               )
             } yield raced
-        }
+          }
         settledJson = raced match {
           case Right(json) => json
-          case Left(_) =>
+          case Left(_)     =>
             fail(
               "consumer stream completed before a PaymentSettled message arrived"
             )
@@ -156,8 +159,9 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
       )
       for {
         store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher.resource[IO](config, NoOpLogger[IO]).use {
-          publisher =>
+        raced <- PaymentEventPublisher
+          .resource[IO](config, NoOpLogger[IO])
+          .use { publisher =>
             for {
               _ <- produce(
                 config,
@@ -192,7 +196,7 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
                 consumeOne(config, PaymentEventPublisher.topic)
               )
             } yield raced
-        }
+          }
       } yield assert(
         raced.isRight,
         s"expected the OrderReserved event to still produce a PaymentSettled message despite the earlier differently-typed one, got: $raced"
@@ -213,8 +217,9 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
       )
       for {
         store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher.resource[IO](config, NoOpLogger[IO]).use {
-          publisher =>
+        raced <- PaymentEventPublisher
+          .resource[IO](config, NoOpLogger[IO])
+          .use { publisher =>
             for {
               _ <- produce(
                 config,
@@ -240,7 +245,7 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
                 consumeOne(config, PaymentEventPublisher.topic)
               )
             } yield raced
-        }
+          }
       } yield assert(
         raced.isRight,
         s"expected the good event to still produce a PaymentSettled message despite the earlier malformed one, got: $raced"
@@ -261,8 +266,9 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
       )
       for {
         store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher.resource[IO](config, NoOpLogger[IO]).use {
-          publisher =>
+        raced <- PaymentEventPublisher
+          .resource[IO](config, NoOpLogger[IO])
+          .use { publisher =>
             for {
               _ <- produceNullKey(
                 config,
@@ -287,7 +293,7 @@ class OrderReservedConsumerSuite extends CatsEffectSuite with TestContainerForAl
                 consumeOne(config, PaymentEventPublisher.topic)
               )
             } yield raced
-        }
+          }
       } yield assert(
         raced.isRight,
         s"expected the good event to still produce a PaymentSettled message despite the earlier null-keyed one, got: $raced"

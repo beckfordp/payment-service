@@ -1,7 +1,7 @@
 package paymentservice
 
 import cats.Applicative
-import cats.effect.{Async, Resource}
+import cats.effect.{Async, Resource, Sync}
 import cats.effect.syntax.all._
 import cats.syntax.all._
 import fs2.kafka._
@@ -9,6 +9,7 @@ import io.circe.syntax._
 import org.typelevel.log4cats.StructuredLogger
 import retry.{ResultHandler, RetryPolicies}
 
+import java.util.UUID
 import scala.concurrent.duration._
 
 trait PaymentEventPublisher[F[_]] {
@@ -18,8 +19,8 @@ trait PaymentEventPublisher[F[_]] {
 
 object PaymentEventPublisher {
 
-  val settledTopic: String = "payment.settled"
-  val failedTopic: String = "payment.failed"
+  val topic: String = "payment-events"
+  private val source: String = "payment-service"
 
   /** Bounds how long a single publish attempt can take. */
   private val publishTimeout: FiniteDuration = 2.seconds
@@ -67,14 +68,10 @@ object PaymentEventPublisher {
             .limitRetries[F](maxRetries)
             .join(RetryPolicies.exponentialBackoff[F](baseDelay))
 
-        private def publish(
-            topic: String,
-            key: String,
-            json: String
-        ): F[Unit] = {
+        private def publish(key: String, envelope: EventEnvelope): F[Unit] = {
           val attempt =
             producer
-              .produceOne_(ProducerRecord(topic, key, json))
+              .produceOne_(ProducerRecord(topic, key, envelope.asJson.noSpaces))
               .flatten
               .timeout(publishTimeout)
               .void
@@ -98,11 +95,30 @@ object PaymentEventPublisher {
             }
         }
 
+        private def envelopeFor[A: io.circe.Encoder](
+            eventType: String,
+            correlationId: String,
+            timestamp: java.time.Instant,
+            payload: A
+        ): F[EventEnvelope] =
+          Sync[F].delay(UUID.randomUUID().toString).map { eventId =>
+            EventEnvelope(
+              eventId = eventId,
+              eventType = eventType,
+              timestamp = timestamp,
+              source = source,
+              correlationId = correlationId,
+              payload = payload.asJson
+            )
+          }
+
         def publishSettled(event: PaymentSettledEvent): F[Unit] =
-          publish(settledTopic, event.orderId, event.asJson.noSpaces)
+          envelopeFor("PaymentSettled", event.orderId, event.timestamp, event)
+            .flatMap(publish(event.orderId, _))
 
         def publishFailed(event: PaymentFailedEvent): F[Unit] =
-          publish(failedTopic, event.orderId, event.asJson.noSpaces)
+          envelopeFor("PaymentFailed", event.orderId, event.timestamp, event)
+            .flatMap(publish(event.orderId, _))
       }
     }
   }

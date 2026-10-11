@@ -27,19 +27,24 @@ object OrderReservedEvent {
   implicit val codec: Codec[OrderReservedEvent] = deriveCodec
 }
 
-/** Consumes `order.reserved` (US-6.1): creates a `Payment` for the order,
-  * simulates a charge (always succeeds in this track - no real payment provider
-  * decided yet, see the ADR backlog item), and publishes `payment.settled`. No
-  * retry on the consume/processing side (a decode failure is logged and the
-  * offset still committed) - same at-least-once, commit-after-process risk
-  * profile as order-service's own `StockEventConsumer`. No duplicate-delivery
-  * guard: a redelivered `order.reserved` creates a second `Payment` row for the
-  * same `orderId` - that's US-6.2's job (Redis idempotency keys), not this
-  * track's.
+/** Consumes `OrderReserved` envelopes on `order-events` (US-6.1; migrated to
+  * the domain topic + envelope shape per ADR 0009): creates a `Payment` for the
+  * order, simulates a charge (always succeeds in this track - no real payment
+  * provider decided yet, see the ADR backlog item), and publishes
+  * `PaymentSettled` on `payment-events`. `order-events` also carries other
+  * event types (e.g. `OrderStatusChanged`) this consumer doesn't care about
+  *   - those are silently skipped by `eventType`, not logged as malformed. No
+  *     retry on the consume/processing side (a genuine decode failure is logged
+  *     and the offset still committed) - same at-least-once,
+  *     commit-after-process risk profile as order-service's own
+  *     `StockEventConsumer`. No duplicate-delivery guard: a redelivered
+  *     `OrderReserved` creates a second `Payment` row for the same `orderId` -
+  *     that's US-6.2's job (Redis idempotency keys), not this track's.
   */
 object OrderReservedConsumer {
 
-  val topic: String = "order.reserved"
+  val topic: String = "order-events"
+  private val eventType: String = "OrderReserved"
 
   // Key/value typed as Option[String] (via fs2-kafka's null-safe
   // Deserializer.option) rather than plain String: a plain String
@@ -103,16 +108,26 @@ object OrderReservedConsumer {
         val handled: F[Unit] = committable.record.value match {
           case None =>
             logger.error(Map.empty)(
-              "Received order.reserved record with a null value - skipping"
+              "Received order-events record with a null value - skipping"
             )
           case Some(raw) =>
-            decode[OrderReservedEvent](raw) match {
+            decode[EventEnvelope](raw) match {
               case Left(error) =>
                 logger.error(
                   Map("raw" -> raw),
                   error
-                )("Failed to decode order.reserved")
-              case Right(event) => handleEvent(event)
+                )("Failed to decode order-events envelope")
+              case Right(envelope) if envelope.eventType != eventType =>
+                Async[F].unit
+              case Right(envelope) =>
+                envelope.payload.as[OrderReservedEvent] match {
+                  case Left(error) =>
+                    logger.error(
+                      Map("raw" -> raw),
+                      error
+                    )("Failed to decode OrderReserved payload")
+                  case Right(event) => handleEvent(event)
+                }
             }
         }
         handled *> committable.offset.commit

@@ -14,7 +14,9 @@ import java.time.Instant
 import java.util.UUID
 import scala.concurrent.duration._
 
-class PaymentEventPublisherSuite extends CatsEffectSuite with TestContainerForAll {
+class PaymentEventPublisherSuite
+    extends CatsEffectSuite
+    with TestContainerForAll {
 
   override val containerDef: KafkaContainer.Def = KafkaContainer.Def()
 
@@ -22,9 +24,9 @@ class PaymentEventPublisherSuite extends CatsEffectSuite with TestContainerForAl
     KafkaConfig(bootstrapServers = kafka.bootstrapServers)
 
   /** All event types now share one `payment-events` topic (ADR 0009), so a
-    * fresh "earliest" consumer can see another test's leftover message
-    * first — filter for the envelope matching this test's own
-    * `correlationId` rather than just taking the first record.
+    * fresh "earliest" consumer can see another test's leftover message first —
+    * filter for the envelope matching this test's own `correlationId` rather
+    * than just taking the first record.
     */
   private def consumeEnvelope(
       config: KafkaConfig,
