@@ -38,16 +38,16 @@ repo/track.
   against an unreachable broker) unchanged.
 
 ## Acceptance Criteria
-- [ ] `PaymentEventPublisherSuite` confirms both event types land on
+- [x] `PaymentEventPublisherSuite` confirms both event types land on
   `payment-events`, decode as a valid `EventEnvelope` with the right
   `eventType`/`source`/`correlationId`, payload round-trips.
-- [ ] `OrderReservedConsumerSuite` confirms: a synthetic `OrderReserved`
+- [x] `OrderReservedConsumerSuite` confirms: a synthetic `OrderReserved`
   envelope on `order-events` still creates a settled `Payment` and
   publishes `PaymentSettled`; a differently-typed envelope on the same
   topic is ignored, not treated as malformed; a malformed envelope and a
   null-keyed record still don't block a later good event (existing
   TD-2.1-adjacent resilience behavior preserved).
-- [ ] Full `sbt test` suite stays green.
+- [x] Full `sbt test` suite stays green (73/73).
 
 ## Out of Scope
 - `purekafka`-based consumer resilience (Rework 3) — separate track.
