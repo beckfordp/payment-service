@@ -1,0 +1,35 @@
+Task: Extend PaymentStore.update to write the outbox atomically (ADR 0008 / TD-3.4)
+
+Summary: PaymentStore.update now wraps its status-change UPDATE in an
+explicit session.transaction. When the update succeeds AND the new status
+is Settled, it also INSERTs a matching outbox_events row (aggregate_id =
+orderId, correlation_id = orderId, payload = the full EventEnvelope JSON
+wrapping a PaymentSettledEvent) in the same transaction. Added
+skunk-circe as a new dependency for a proper Codec[Json] against the
+jsonb column (avoids a text/jsonb OID mismatch). trace_parent is left
+NULL for now - no trace-context extraction exists anywhere in this
+codebase yet (that's purekafka/ADR 0010's job, sequenced after this
+track).
+
+Deviation from plan.md's literal wording: the plan anticipated needing
+'orderId + envelope-building inputs threaded in as new parameters' on
+update's signature. Turned out unnecessary - orderId/amountCents/updatedAt
+are all already returned by the existing UPDATE...RETURNING clause, so no
+new parameters were needed; update(id, status) keeps its original
+signature. Same approach, simpler implementation.
+
+Added 3 new PaymentStorePostgresSuite tests (Testcontainers-Postgres):
+Settled writes a matching outbox row; non-Settled writes none; unknown id
+writes none. Found and fixed a test-isolation issue along the way:
+TestContainerForAll shares one Postgres container across the whole test
+file, and every existing test in this file reuses the same hardcoded
+orderId - so a naive 'assert outbox_events is empty' check in a later
+test picks up an earlier test's row. Fixed by filtering outbox rows by
+the specific paymentId embedded in each row's own payload instead of
+asserting the whole table is empty.
+
+Files: src/main/scala/paymentservice/PaymentStore.scala,
+src/test/scala/paymentservice/PaymentStorePostgresSuite.scala, build.sbt
+(new skunk-circe dependency).
+
+Verified: sbt scalafmtCheck test - 77 passed, 0 failed.
