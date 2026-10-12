@@ -4,11 +4,13 @@ import cats.effect.IO
 import cats.syntax.all._
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
+import io.circe.parser.decode
 import munit.CatsEffectSuite
 import org.testcontainers.utility.DockerImageName
 import org.typelevel.otel4s.metrics.Meter
 import purerest.metrics.Metrics
 
+import java.sql.DriverManager
 import scala.jdk.CollectionConverters._
 
 class PaymentStorePostgresSuite
@@ -35,8 +37,9 @@ class PaymentStorePostgresSuite
       Migrations.run[IO](config) *> PaymentStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
-          store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999).map { entity =>
-            assert(entity.id.nonEmpty)
+          store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999).map {
+            entity =>
+              assert(entity.id.nonEmpty)
           }
         }
     }
@@ -64,7 +67,10 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+            created <- store.create(
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              4999
+            )
             found <- store.get(created.id)
           } yield assertEquals(found, Some(created))
         }
@@ -102,7 +108,10 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+            created <- store.create(
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              4999
+            )
             updated <- store.update(created.id, PaymentStatus.Pending)
           } yield {
             assertEquals(updated.map(_.id), Some(created.id))
@@ -128,25 +137,158 @@ class PaymentStorePostgresSuite
     }
   }
 
-  test("update returns None for a malformed (non-UUID) id") {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          store.update("not-a-uuid", PaymentStatus.Pending).map(assertEquals(_, None))
+  /** `TestContainerForAll` shares one container across every test in this
+    * suite, and every test here reuses the same hardcoded `orderId` — so
+    * filtering by `paymentId` (embedded in each row's own payload, unique per
+    * `store.create` call) is what actually isolates one test's rows from
+    * another's, not a global "the table is empty" assertion.
+    */
+  private def outboxRowsForPayment(
+      postgres: PostgreSQLContainer,
+      paymentId: String
+  ): List[(String, String, EventEnvelope)] = {
+    val conn = DriverManager.getConnection(
+      postgres.jdbcUrl,
+      postgres.username,
+      postgres.password
+    )
+    try {
+      val rs = conn
+        .createStatement()
+        .executeQuery(
+          "select aggregate_id, correlation_id, payload::text from outbox_events"
+        )
+      Iterator
+        .unfold(())(_ =>
+          if (rs.next())
+            Some(
+              (
+                (
+                  rs.getString("aggregate_id"),
+                  rs.getString("correlation_id"),
+                  rs.getString("payload")
+                ),
+                ()
+              )
+            )
+          else None
+        )
+        .toList
+        .flatMap { case (aggregateId, correlationId, rawPayload) =>
+          decode[EventEnvelope](rawPayload).toOption
+            .flatMap(envelope =>
+              envelope.payload
+                .as[PaymentSettledEvent]
+                .toOption
+                .filter(_.paymentId == paymentId)
+                .as((aggregateId, correlationId, envelope))
+            )
         }
-    }
+    } finally conn.close()
   }
 
-  test("delete removes the entity and returns true, and get then returns None") {
+  test(
+    "update to Settled writes a matching outbox row, atomically with the status-change UPDATE"
+  ) {
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+            created <- store.create(
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              4999
+            )
+            updated <- store.update(created.id, PaymentStatus.Settled)
+          } yield {
+            assertEquals(updated.map(_.status), Some(PaymentStatus.Settled))
+            val rows = outboxRowsForPayment(postgres, created.id)
+            assertEquals(
+              rows.size,
+              1,
+              s"expected exactly one outbox row, got: $rows"
+            )
+            val (aggregateId, correlationId, envelope) = rows.head
+            assertEquals(aggregateId, "3fa85f64-5717-4562-b3fc-2c963f66afa6")
+            assertEquals(correlationId, "3fa85f64-5717-4562-b3fc-2c963f66afa6")
+            assertEquals(envelope.eventType, "PaymentSettled")
+            val settled = envelope.payload.as[PaymentSettledEvent].toOption
+            assertEquals(
+              settled.map(_.orderId),
+              Some("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+            )
+            assertEquals(settled.map(_.paymentId), Some(created.id))
+            assertEquals(settled.map(_.amountCents), Some(4999))
+          }
+        }
+    }
+  }
+
+  test(
+    "update to a non-Settled status writes no outbox row"
+  ) {
+    withContainers { postgres =>
+      val config = configFor(postgres)
+      Migrations.run[IO](config) *> PaymentStore
+        .postgres[IO](config, Meter.noop[IO])
+        .use { store =>
+          for {
+            created <- store.create(
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              4999
+            )
+            _ <- store.update(created.id, PaymentStatus.Pending)
+          } yield assertEquals(outboxRowsForPayment(postgres, created.id), Nil)
+        }
+    }
+  }
+
+  test(
+    "update on an unknown id writes no outbox row (atomicity: no state change, no event)"
+  ) {
+    withContainers { postgres =>
+      val config = configFor(postgres)
+      Migrations.run[IO](config) *> PaymentStore
+        .postgres[IO](config, Meter.noop[IO])
+        .use { store =>
+          val unknownId = java.util.UUID.randomUUID().toString
+          store
+            .update(unknownId, PaymentStatus.Settled)
+            .map { result =>
+              assertEquals(result, None)
+              assertEquals(outboxRowsForPayment(postgres, unknownId), Nil)
+            }
+        }
+    }
+  }
+
+  test("update returns None for a malformed (non-UUID) id") {
+    withContainers { postgres =>
+      val config = configFor(postgres)
+      Migrations.run[IO](config) *> PaymentStore
+        .postgres[IO](config, Meter.noop[IO])
+        .use { store =>
+          store
+            .update("not-a-uuid", PaymentStatus.Pending)
+            .map(assertEquals(_, None))
+        }
+    }
+  }
+
+  test(
+    "delete removes the entity and returns true, and get then returns None"
+  ) {
+    withContainers { postgres =>
+      val config = configFor(postgres)
+      Migrations.run[IO](config) *> PaymentStore
+        .postgres[IO](config, Meter.noop[IO])
+        .use { store =>
+          for {
+            created <- store.create(
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              4999
+            )
             deleted <- store.delete(created.id)
             found <- store.get(created.id)
           } yield {
@@ -208,37 +350,39 @@ class PaymentStorePostgresSuite
   ) {
     withContainers { postgres =>
       val config = configFor(postgres)
-      Metrics.test[IO]("payment-store-postgres-metrics-test").use {
-        testMeter =>
-          Migrations.run[IO](config) *> PaymentStore
-            .postgres[IO](config, testMeter.meter)
-            .use { store =>
-              for {
-                created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-                _ <- store.get(created.id)
-                metrics <- testMeter.collectMetrics
-              } yield {
-                val data =
-                  metrics.find(_.getName == "db.client.operation.duration")
-                assert(
-                  data.isDefined,
-                  s"expected a db.client.operation.duration series, got: $metrics"
+      Metrics.test[IO]("payment-store-postgres-metrics-test").use { testMeter =>
+        Migrations.run[IO](config) *> PaymentStore
+          .postgres[IO](config, testMeter.meter)
+          .use { store =>
+            for {
+              created <- store.create(
+                "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                4999
+              )
+              _ <- store.get(created.id)
+              metrics <- testMeter.collectMetrics
+            } yield {
+              val data =
+                metrics.find(_.getName == "db.client.operation.duration")
+              assert(
+                data.isDefined,
+                s"expected a db.client.operation.duration series, got: $metrics"
+              )
+              val dbOperationKey =
+                io.opentelemetry.api.common.AttributeKey
+                  .stringKey("db.operation")
+              val operations = data.get.getHistogramData.getPoints.asScala
+                .flatMap(point =>
+                  Option(point.getAttributes.get(dbOperationKey))
                 )
-                val dbOperationKey =
-                  io.opentelemetry.api.common.AttributeKey
-                    .stringKey("db.operation")
-                val operations = data.get.getHistogramData.getPoints.asScala
-                  .flatMap(point =>
-                    Option(point.getAttributes.get(dbOperationKey))
-                  )
-                  .toSet
-                assert(
-                  operations
-                    .contains("insert") && operations.contains("select"),
-                  s"expected db.operation attributes for both insert and select, got: $operations"
-                )
-              }
+                .toSet
+              assert(
+                operations
+                  .contains("insert") && operations.contains("select"),
+                s"expected db.operation attributes for both insert and select, got: $operations"
+              )
             }
+          }
       }
     }
   }
@@ -251,40 +395,41 @@ class PaymentStorePostgresSuite
       // `mappedPort(5432) + 1`, it can't collide with another concurrently-running
       // Testcontainers Postgres instance's dynamically assigned port.
       val unreachableConfig = configFor(postgres).copy(port = 1)
-      Metrics.test[IO]("payment-store-postgres-metrics-test").use {
-        testMeter =>
-          PaymentStore
-            .postgres[IO](unreachableConfig, testMeter.meter)
-            .use { store =>
-              for {
-                result <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999).attempt
-                metrics <- testMeter.collectMetrics
-              } yield {
-                assert(
-                  result.isLeft,
-                  s"expected the connection failure to propagate, got: $result"
+      Metrics.test[IO]("payment-store-postgres-metrics-test").use { testMeter =>
+        PaymentStore
+          .postgres[IO](unreachableConfig, testMeter.meter)
+          .use { store =>
+            for {
+              result <- store
+                .create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+                .attempt
+              metrics <- testMeter.collectMetrics
+            } yield {
+              assert(
+                result.isLeft,
+                s"expected the connection failure to propagate, got: $result"
+              )
+              val data =
+                metrics.find(_.getName == "db.client.operation.duration")
+              assert(
+                data.isDefined,
+                s"expected a db.client.operation.duration series, got: $metrics"
+              )
+              val errorTypeKey =
+                io.opentelemetry.api.common.AttributeKey.stringKey(
+                  "error.type"
                 )
-                val data =
-                  metrics.find(_.getName == "db.client.operation.duration")
-                assert(
-                  data.isDefined,
-                  s"expected a db.client.operation.duration series, got: $metrics"
-                )
-                val errorTypeKey =
-                  io.opentelemetry.api.common.AttributeKey.stringKey(
-                    "error.type"
+              val hasErrorAttribute =
+                data.get.getHistogramData.getPoints.asScala
+                  .exists(point =>
+                    Option(point.getAttributes.get(errorTypeKey)).isDefined
                   )
-                val hasErrorAttribute =
-                  data.get.getHistogramData.getPoints.asScala
-                    .exists(point =>
-                      Option(point.getAttributes.get(errorTypeKey)).isDefined
-                    )
-                assert(
-                  hasErrorAttribute,
-                  s"expected a point tagged with error.type, got: ${data.get.getHistogramData.getPoints}"
-                )
-              }
+              assert(
+                hasErrorAttribute,
+                s"expected a point tagged with error.type, got: ${data.get.getHistogramData.getPoints}"
+              )
             }
+          }
       }
     }
   }
@@ -299,7 +444,10 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             ready <- store.ping
-            created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+            created <- store.create(
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              4999
+            )
             read1 <- store.get(created.id)
             updated <- store.update(created.id, PaymentStatus.Pending)
             read2 <- store.get(created.id)
@@ -308,7 +456,10 @@ class PaymentStorePostgresSuite
           } yield {
             assert(ready, "expected the database to be ready")
             assertEquals(read1, Some(created))
-            assertEquals(updated.map(_.orderId), Some("3fa85f64-5717-4562-b3fc-2c963f66afa6"))
+            assertEquals(
+              updated.map(_.orderId),
+              Some("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+            )
             assertEquals(updated.map(_.amountCents), Some(4999))
             assertEquals(updated.map(_.status), Some(PaymentStatus.Pending))
             assertEquals(read2, updated)

@@ -71,6 +71,10 @@ lazy val root = project
       "com.softwaremill.sttp.tapir" %% "tapir-http4s-server" % tapirVersion,
       // skunk: non-blocking, pure-FP Postgres access — this service's persistence layer.
       "org.tpolecat" %% "skunk-core" % skunkVersion,
+      // skunk-circe: Codec[Json] for the outbox_events.payload jsonb column
+      // (ADR 0008 / TD-3.4) — avoids a text/jsonb OID mismatch from reusing
+      // the plain `text` codec against a jsonb column.
+      "org.tpolecat" %% "skunk-circe" % skunkVersion,
       // flyway: JDBC-based schema migration tool, run on startup to create/update the
       // payment table. Independent of Skunk (which handles all runtime queries).
       "org.flywaydb" % "flyway-core" % flywayVersion,
