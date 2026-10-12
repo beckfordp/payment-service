@@ -1,8 +1,8 @@
 # Plan — TD-3.4: Transactional outbox for payment-service (ADR 0008)
 
 ## Phase 1 — Outbox table + atomic settle write
-- [ ] Task: Write failing `MigrationsSuite` test asserting `outbox_events` exists with columns `id`/`aggregate_id`/`payload`/`trace_parent`/`correlation_id`/`created_at` (Red)
-- [ ] Task: Add `V3__create_outbox_events.sql` migration to make it pass (Green)
+- [x] Task: Write failing `MigrationsSuite` test asserting `outbox_events` exists with columns `id`/`aggregate_id`/`payload`/`trace_parent`/`correlation_id`/`created_at` (Red) `893057b`
+- [x] Task: Add `V3__create_outbox_events.sql` migration to make it pass (Green) `893057b`
 - [ ] Task: Write failing `PaymentStoreSuite` test: `update(id, Settled)` writes a matching outbox row (`aggregate_id`/`correlation_id` = `orderId`) in the same transaction as the status-change UPDATE (Red)
 - [ ] Task: Extend `PaymentStore.update` (needs `orderId` + envelope-building inputs threaded in) to write the outbox row inside its existing transaction when transitioning to `Settled` (Green)
 - [ ] Task: Write failing atomicity test: `update` on a non-existent payment id (returns `None`) writes no outbox row (Red); confirm the existing `None`-short-circuit path already satisfies this (Green)
