@@ -2,6 +2,9 @@
 
 This file tracks all major tracks for the project.
 
+- [ ] **Track: Transactional outbox for payment-service (TD-3.4, ADR 0008)**
+  *Link: [./tracks/outbox_20261012/](./tracks/outbox_20261012/)*
+
 ---
 
 ## Backlog
@@ -11,7 +14,6 @@ folder), so `/conductor:implement` cannot pick these up by accident. Reorder fre
 priorities change. When ready to work on one, run `/conductor:newTrack <title>` to go
 through the spec/plan questions and promote it into a real track above.
 
-- TD-3.4 / ADR 0008: transactional outbox — add `outbox_events` table (Flyway migration), write to it in the same transaction as the payment state change, drop the direct `PaymentEventPublisher` calls
 - US-6.2: Redis idempotency keys to avoid double-charging on retry/redelivery
 - ADR: payment provider — real integration (Stripe etc.) vs. simulated
 
