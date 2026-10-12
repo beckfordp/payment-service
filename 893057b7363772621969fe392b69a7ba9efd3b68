@@ -1,0 +1,15 @@
+Task: Add outbox_events table migration (ADR 0008 / TD-3.4)
+
+Summary: Added Flyway migration V3__create_outbox_events.sql creating the
+outbox_events table (id, aggregate_id, payload jsonb, trace_parent,
+correlation_id, created_at). Added a failing MigrationsSuite test first
+(Red), confirmed it failed against the pre-migration schema, then added
+the migration (Green) and confirmed all 4 MigrationsSuite tests pass.
+
+Files: src/main/resources/db/migration/V3__create_outbox_events.sql (new),
+src/test/scala/paymentservice/MigrationsSuite.scala (new test case).
+
+Why: ADR 0008 decided transactional outbox via Debezium CDC to close
+TD-3's dual-write hazard. This table is the first prerequisite; later
+tasks in this track wire PaymentStore.update and OrderReservedConsumer to
+write to it instead of calling PaymentEventPublisher directly.
