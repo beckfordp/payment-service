@@ -64,7 +64,6 @@ object OrderReservedConsumer {
   def run[F[_]: Async](
       config: KafkaConfig,
       store: PaymentStore[F],
-      publisher: PaymentEventPublisher[F],
       logger: StructuredLogger[F]
   ): Stream[F, Unit] =
     KafkaConsumer

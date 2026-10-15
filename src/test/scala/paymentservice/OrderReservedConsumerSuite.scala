@@ -102,22 +102,8 @@ class OrderReservedConsumerSuite
       .map(_.get)
       .timeout(15.seconds)
 
-  /** Counts `publishSettled` calls without touching Kafka at all - used only
-    * by the happy-path test below to prove the consumer no longer publishes
-    * directly (ADR 0008 Phase 2: the outbox write in `store.update` replaces
-    * this call entirely).
-    */
-  private def recordingPublisher(
-      countRef: Ref[IO, Int]
-  ): PaymentEventPublisher[IO] =
-    new PaymentEventPublisher[IO] {
-      def publishSettled(event: PaymentSettledEvent): IO[Unit] =
-        countRef.update(_ + 1)
-      def publishFailed(event: PaymentFailedEvent): IO[Unit] = IO.unit
-    }
-
   test(
-    "a synthetic OrderReserved envelope settles the Payment via the outbox-aware store, without calling the publisher directly"
+    "a synthetic OrderReserved envelope settles the Payment via the outbox-aware store"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
@@ -130,9 +116,7 @@ class OrderReservedConsumerSuite
       for {
         underlying <- PaymentStore.inMemory[IO]
         settledRef <- Ref.of[IO, Option[Payment]](None)
-        publishCount <- Ref.of[IO, Int](0)
         store = observingStore(underlying, settledRef)
-        publisher = recordingPublisher(publishCount)
         _ <- produce(
           config,
           OrderReservedConsumer.topic,
@@ -141,7 +125,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, publisher, NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO])
             .compile
             .drain,
           awaitSettled(settledRef)
@@ -151,20 +135,10 @@ class OrderReservedConsumerSuite
           case Left(_)         =>
             fail("consumer stream completed before the payment settled")
         }
-        // The old direct-publish call, if it still existed, would have fired
-        // synchronously right after the same store.update this already
-        // raced on - this buffer is for scheduling, not a real race.
-        _ <- IO.sleep(500.millis)
-        finalCount <- publishCount.get
       } yield {
         assertEquals(settled.orderId, event.orderId)
         assertEquals(settled.amountCents, event.totalCents)
         assertEquals(settled.status, PaymentStatus.Settled)
-        assertEquals(
-          finalCount,
-          0,
-          "publisher.publishSettled should no longer be called - the outbox write inside store.update replaces it"
-        )
       }
     }
   }
@@ -207,7 +181,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, PaymentEventPublisher.noOp[IO], NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO])
             .compile
             .drain,
           awaitSettled(settledRef)
@@ -248,7 +222,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, PaymentEventPublisher.noOp[IO], NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO])
             .compile
             .drain,
           awaitSettled(settledRef)
@@ -288,7 +262,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, PaymentEventPublisher.noOp[IO], NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO])
             .compile
             .drain,
           awaitSettled(settledRef)

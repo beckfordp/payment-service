@@ -34,51 +34,48 @@ object Main extends IOApp.Simple {
               )("payment-service starting")
               _ <- PaymentStore.postgres[IO](config.postgres, meter).use {
                 store =>
-                  PaymentEventPublisher.resource[IO](config.kafka, logger).use {
-                    publisher =>
-                      OrderReservedConsumer
-                        .run[IO](config.kafka, store, publisher, logger)
-                        .compile
-                        .drain
-                        .background
-                        .use { _ =>
-                          val docsRoutes = Docs.routes[IO](
-                            "Payment Service",
-                            "1.0",
-                            List(
-                              PaymentRoutes.serverEndpoint[IO](store, logger),
-                              PaymentRoutes
-                                .getPaymentServerEndpoint[IO](store, logger),
-                              PaymentRoutes
-                                .updatePaymentServerEndpoint[IO](store, logger),
-                              PaymentRoutes
-                                .replacePaymentServerEndpoint[IO](
-                                  store,
-                                  logger
-                                ),
-                              PaymentRoutes
-                                .deletePaymentServerEndpoint[IO](
-                                  store,
-                                  logger
-                                ),
-                              HealthRoutes.healthServerEndpoint[IO],
-                              HealthRoutes.readyServerEndpoint[IO](store)
-                            )
-                          )
-                          val tracedRoutes =
-                            ServerTracing.middleware(tracer)(docsRoutes)
-                          val meteredRoutes =
-                            ServerMetrics.middleware[IO](meter)(tracedRoutes)
-                          val routes = Cors.middleware[IO](meteredRoutes)
-                          EmberServerBuilder
-                            .default[IO]
-                            .withHost(host"0.0.0.0")
-                            .withPort(port)
-                            .withHttpApp(routes.orNotFound)
-                            .build
-                            .useForever
-                        }
-                  }
+                  OrderReservedConsumer
+                    .run[IO](config.kafka, store, logger)
+                    .compile
+                    .drain
+                    .background
+                    .use { _ =>
+                      val docsRoutes = Docs.routes[IO](
+                        "Payment Service",
+                        "1.0",
+                        List(
+                          PaymentRoutes.serverEndpoint[IO](store, logger),
+                          PaymentRoutes
+                            .getPaymentServerEndpoint[IO](store, logger),
+                          PaymentRoutes
+                            .updatePaymentServerEndpoint[IO](store, logger),
+                          PaymentRoutes
+                            .replacePaymentServerEndpoint[IO](
+                              store,
+                              logger
+                            ),
+                          PaymentRoutes
+                            .deletePaymentServerEndpoint[IO](
+                              store,
+                              logger
+                            ),
+                          HealthRoutes.healthServerEndpoint[IO],
+                          HealthRoutes.readyServerEndpoint[IO](store)
+                        )
+                      )
+                      val tracedRoutes =
+                        ServerTracing.middleware(tracer)(docsRoutes)
+                      val meteredRoutes =
+                        ServerMetrics.middleware[IO](meter)(tracedRoutes)
+                      val routes = Cors.middleware[IO](meteredRoutes)
+                      EmberServerBuilder
+                        .default[IO]
+                        .withHost(host"0.0.0.0")
+                        .withPort(port)
+                        .withHttpApp(routes.orNotFound)
+                        .build
+                        .useForever
+                    }
               }
             } yield ()
         }
