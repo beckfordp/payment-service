@@ -13,7 +13,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Wire OrderReservedConsumer to the outbox' (Protocol in workflow.md) `dbbadd8` — reduced-prompting mode: automated-test verification only (77 passed), no interactive walkthrough; see git note on `dbbadd8`
 
 ## Phase 3 — Delete PaymentEventPublisher
-- [ ] Task: Delete `PaymentEventPublisher.scala` and `PaymentEventPublisherSuite.scala`
-- [ ] Task: Remove `PaymentEventPublisher.resource(...).use { ... }` wiring and publisher parameter threading from `Main.scala` and `OrderReservedConsumer`
-- [ ] Task: Run full test suite, confirm no regressions, confirm nothing still references `PaymentEventPublisher`
+- [x] Task: Delete `PaymentEventPublisher.scala` and `PaymentEventPublisherSuite.scala` `85d64c2`
+- [x] Task: Remove `PaymentEventPublisher.resource(...).use { ... }` wiring and publisher parameter threading from `Main.scala` and `OrderReservedConsumer` `85d64c2` — done in the same commit as the deletion above, since neither compiles without the other; also dropped the Phase-2-era `recordingPublisher` test double from `OrderReservedConsumerSuite` (no type left to construct it against) — see git note on `85d64c2` for full detail
+- [x] Task: Run full test suite, confirm no regressions, confirm nothing still references `PaymentEventPublisher` `85d64c2` — `sbt test`: 74 passed, 0 failed (down from 77, the 3 deleted `PaymentEventPublisherSuite` tests); `grep -rl PaymentEventPublisher src/` returns nothing
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Delete PaymentEventPublisher' (Protocol in workflow.md)
