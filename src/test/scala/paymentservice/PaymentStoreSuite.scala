@@ -35,7 +35,9 @@ class PaymentStoreSuite extends CatsEffectSuite {
     } yield assertNotEquals(first.id, second.id)
   }
 
-  test("update returns the updated entity with updatedAt not moving backwards") {
+  test(
+    "update returns the updated entity with updatedAt not moving backwards"
+  ) {
     for {
       store <- PaymentStore.inMemory[IO]
       created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
@@ -56,7 +58,9 @@ class PaymentStoreSuite extends CatsEffectSuite {
     } yield assertEquals(result, None)
   }
 
-  test("delete removes the entity and returns true, and get then returns None") {
+  test(
+    "delete removes the entity and returns true, and get then returns None"
+  ) {
     for {
       store <- PaymentStore.inMemory[IO]
       created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)

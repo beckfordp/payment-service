@@ -35,7 +35,9 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       store <- PaymentStore.inMemory[IO]
       routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
       request = Request[IO](Method.POST, uri"/payments")
-        .withEntity(CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999))
+        .withEntity(
+          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+        )
       response <- routes.orNotFound.run(request)
       entity <- response.as[PaymentResponse]
     } yield {
@@ -91,7 +93,9 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       testLogger = StructuredTestingLogger.impl[IO]()
       routes = PaymentRoutes.routes[IO](store, testLogger)
       request = Request[IO](Method.POST, uri"/payments")
-        .withEntity(CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999))
+        .withEntity(
+          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+        )
       response <- routes.orNotFound.run(request)
       entity <- response.as[PaymentResponse]
       logged <- testLogger.logged
@@ -122,7 +126,9 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       testLogger <- IO.pure(StructuredTestingLogger.impl[IO]())
       routes = PaymentRoutes.routes[IO](failingStore(boom), testLogger)
       request = Request[IO](Method.POST, uri"/payments")
-        .withEntity(CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999))
+        .withEntity(
+          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+        )
       response <- routes.orNotFound.run(request)
       logged <- testLogger.logged
     } yield {
@@ -578,7 +584,9 @@ class PaymentRoutesSuite extends CatsEffectSuite {
           PaymentRoutes.routes[IO](store, NoOpLogger[IO])
         )
         request = Request[IO](Method.POST, uri"/payments")
-          .withEntity(CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999))
+          .withEntity(
+            CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+          )
         response <- routes.orNotFound.run(request)
         spans <- testTracer.finishedSpans
       } yield {

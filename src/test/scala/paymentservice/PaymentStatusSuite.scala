@@ -5,15 +5,24 @@ import munit.CatsEffectSuite
 class PaymentStatusSuite extends CatsEffectSuite {
 
   test("fromString parses \"pending\" as Pending") {
-    assertEquals(PaymentStatus.fromString("pending"), Right(PaymentStatus.Pending))
+    assertEquals(
+      PaymentStatus.fromString("pending"),
+      Right(PaymentStatus.Pending)
+    )
   }
 
   test("fromString parses \"settled\" as Settled") {
-    assertEquals(PaymentStatus.fromString("settled"), Right(PaymentStatus.Settled))
+    assertEquals(
+      PaymentStatus.fromString("settled"),
+      Right(PaymentStatus.Settled)
+    )
   }
 
   test("fromString parses \"failed\" as Failed") {
-    assertEquals(PaymentStatus.fromString("failed"), Right(PaymentStatus.Failed))
+    assertEquals(
+      PaymentStatus.fromString("failed"),
+      Right(PaymentStatus.Failed)
+    )
   }
 
   test("fromString rejects an unrecognized value") {
