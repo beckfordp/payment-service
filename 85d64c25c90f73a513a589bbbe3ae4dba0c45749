@@ -1,0 +1,12 @@
+Task: Delete PaymentEventPublisher.scala and PaymentEventPublisherSuite.scala + remove wiring from Main.scala and OrderReservedConsumer (Phase 3, TD-3.4/ADR 0008).
+
+Summary: deleted PaymentEventPublisher.scala and PaymentEventPublisherSuite.scala entirely (trait, Resource-based Kafka-producer interpreter, noOp, publishFailed included - publishFailed had no call site even before this, deleted as part of the whole type regardless). Removed the publisher parameter from OrderReservedConsumer.run and the PaymentEventPublisher.resource(...).use { ... } wrapping in Main.scala (one less nesting level - fixed the resulting brace/indentation directly, then ran sbt scalafmt to normalize). OrderReservedConsumerSuite's 4 tests updated to drop the now-nonexistent publisher argument from OrderReservedConsumer.run calls; also removed the Phase-2-era recordingPublisher test double and its assertion from the happy-path test, since there's no PaymentEventPublisher type left to construct a double of - the earlier assertion (publishSettled never called) is moot once the type is gone, not just unobserved.
+
+Files changed:
+- src/main/scala/paymentservice/Main.scala
+- src/main/scala/paymentservice/OrderReservedConsumer.scala
+- src/main/scala/paymentservice/PaymentEventPublisher.scala (deleted)
+- src/test/scala/paymentservice/OrderReservedConsumerSuite.scala
+- src/test/scala/paymentservice/PaymentEventPublisherSuite.scala (deleted)
+
+Verification: sbt compile (clean), sbt test - 74 passed, 0 failed, 0 errors (down from 77 - the 3 deleted PaymentEventPublisherSuite tests). grep confirms zero remaining references to PaymentEventPublisher anywhere in src/.
