@@ -1,0 +1,11 @@
+Task: Wire OrderReservedConsumer to the outbox, not the publisher (Phase 2, TD-3.4/ADR 0008).
+
+Summary: removed the publisher.publishSettled(...) call from handleEvent entirely. No new parameters were needed on store.update's call site - Phase 1 already made PaymentStore.update write the outbox row atomically when transitioning to Settled, using only data the existing UPDATE...RETURNING already returns. The publisher parameter is still threaded through run(...) for now; Phase 3 removes it along with the PaymentEventPublisher type itself.
+
+Test redesign (deviation from the literal plan wording): the original plan assumed the Red test would assert an outbox row appears instead of a publisher invocation, but PaymentStore.inMemory (used by this consumer suite) has no outbox table at all - that assertion only makes sense against Testcontainers-Postgres, which Phase 1's PaymentStoreSuite already covers directly. Instead, redesigned OrderReservedConsumerSuite's 4 tests to: (1) observe settlement via a store wrapper writing into a Ref instead of racing against a live payment-events Kafka message (since the app no longer produces one), and (2) for the happy-path test specifically, added a recording PaymentEventPublisher test double asserting publishSettled is called zero times, with a 500ms buffer after settlement to make the Red phase reliably red rather than racy.
+
+Files changed:
+- src/main/scala/paymentservice/OrderReservedConsumer.scala
+- src/test/scala/paymentservice/OrderReservedConsumerSuite.scala
+
+Verification: sbt test - 77 passed, 0 failed.
