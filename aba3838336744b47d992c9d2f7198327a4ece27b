@@ -1,0 +1,10 @@
+Phase 3 Checkpoint — Delete PaymentEventPublisher (TD-3.4/ADR 0008)
+
+Automated test command: sbt test
+Result: 74 passed, 0 failed, 0 errors.
+
+Reduced-prompting mode (.claude/prompt-off): no interactive manual-verification walkthrough. Verification: PaymentEventPublisher.scala and its test suite are gone; grep -rl PaymentEventPublisher src/ returns nothing; Main.scala and OrderReservedConsumer no longer reference it; sbt compile is clean; full suite passes.
+
+This closes TD-3.4/ADR 0008 for payment-service: PaymentStore.update writes the outbox_events row atomically whenever a payment transitions to Settled (Phase 1); OrderReservedConsumer no longer calls a Kafka producer directly at all (Phase 2); the now-dead publish path is deleted outright (Phase 3). Still blocked on TD-3.1 (Kafka Connect + Debezium connector, gluon-root infra) before outbox rows actually reach a real payment-events topic - that's a separate, independent piece of work, not part of this track.
+
+No user confirmation collected — reduced-prompting mode per project convention.
