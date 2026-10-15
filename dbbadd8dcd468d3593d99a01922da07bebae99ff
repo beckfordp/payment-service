@@ -1,0 +1,10 @@
+Phase 2 Checkpoint — Wire OrderReservedConsumer to the outbox (TD-3.4/ADR 0008)
+
+Automated test command: sbt test
+Result: 77 passed, 0 failed, 0 errors.
+
+Reduced-prompting mode (.claude/prompt-off): no interactive manual-verification walkthrough. Verification is the automated suite above plus direct inspection of the diff: OrderReservedConsumer.handleEvent no longer calls PaymentEventPublisher.publishSettled anywhere; the only remaining Kafka-facing side effect of settling a payment is the outbox_events row PaymentStore.update already writes atomically (Phase 1). OrderReservedConsumerSuite's 4 tests (decode/dispatch resilience: happy path, ignored eventType, malformed envelope, null-keyed record) all pass against a real Testcontainers-Kafka broker for the input side; the happy-path test additionally proves publishSettled is never invoked via a recording test double.
+
+Files changed since Phase 1 checkpoint (4391b80): plan.md, Cors.scala/CorsSuite.scala/PaymentDocsSuite.scala/PaymentRoutesSuite.scala/PaymentStatusSuite.scala/PaymentStoreSuite.scala (pre-existing scalafmt cleanup, no behavior change), OrderReservedConsumer.scala + OrderReservedConsumerSuite.scala (the real Phase 2 work).
+
+No user confirmation collected — reduced-prompting mode per project convention.
