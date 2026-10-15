@@ -78,6 +78,9 @@ object OrderReservedConsumer {
             settled <- store.update(payment.id, PaymentStatus.Settled)
             _ <- settled match {
               case Some(settledPayment) =>
+                // No separate Kafka publish here (ADR 0008 / TD-3.4):
+                // `store.update` already wrote the matching `outbox_events`
+                // row atomically alongside the Settled transition above.
                 logger.info(
                   Map(
                     "order_id" -> event.orderId,
@@ -85,13 +88,6 @@ object OrderReservedConsumer {
                   )
                 )(
                   "Payment created and settled from order.reserved event"
-                ) *> publisher.publishSettled(
-                  PaymentSettledEvent(
-                    orderId = event.orderId,
-                    paymentId = settledPayment.id,
-                    amountCents = settledPayment.amountCents,
-                    timestamp = settledPayment.updatedAt
-                  )
                 )
               case None =>
                 logger.error(

@@ -1,11 +1,10 @@
 package paymentservice
 
-import cats.effect.IO
+import cats.effect.{IO, Ref}
 import com.dimafeng.testcontainers.KafkaContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
 import fs2.kafka._
 import io.circe.Json
-import io.circe.parser.decode
 import io.circe.syntax._
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.noop.NoOpLogger
@@ -73,27 +72,52 @@ class OrderReservedConsumerSuite
       payload = payload
     ).asJson.noSpaces
 
-  private def consumeOne(config: KafkaConfig, topic: String): IO[String] = {
-    val consumerSettings =
-      ConsumerSettings[IO, String, String]
-        .withBootstrapServers(config.bootstrapServers)
-        .withGroupId(s"test-${UUID.randomUUID()}")
-        .withAutoOffsetReset(AutoOffsetReset.Earliest)
-
-    KafkaConsumer.resource(consumerSettings).use { consumer =>
-      for {
-        _ <- consumer.subscribeTo(topic)
-        record <- consumer.stream
-          .take(1)
-          .compile
-          .lastOrError
-          .timeout(15.seconds)
-      } yield record.record.value
+  /** Wraps a real `PaymentStore` with a side channel recording every
+    * `Settled` payment `update` produces - ADR 0008 moved the outbox write
+    * itself inside `PaymentStore.update` (Phase 1, no live Kafka needed to
+    * observe it), so these consumer-level tests no longer race against a
+    * real `payment-events` message; they poll this instead.
+    */
+  private def observingStore(
+      underlying: PaymentStore[IO],
+      settledRef: Ref[IO, Option[Payment]]
+  ): PaymentStore[IO] =
+    new PaymentStore[IO] {
+      def create(orderId: String, amountCents: Int): IO[Payment] =
+        underlying.create(orderId, amountCents)
+      def get(id: String): IO[Option[Payment]] = underlying.get(id)
+      def update(id: String, status: PaymentStatus): IO[Option[Payment]] =
+        underlying.update(id, status).flatTap {
+          case Some(payment) if status == PaymentStatus.Settled =>
+            settledRef.set(Some(payment))
+          case _ => IO.unit
+        }
+      def delete(id: String): IO[Boolean] = underlying.delete(id)
+      def ping: IO[Boolean] = underlying.ping
     }
-  }
+
+  private def awaitSettled(settledRef: Ref[IO, Option[Payment]]): IO[Payment] =
+    (IO.sleep(50.millis) *> settledRef.get)
+      .iterateUntil(_.isDefined)
+      .map(_.get)
+      .timeout(15.seconds)
+
+  /** Counts `publishSettled` calls without touching Kafka at all - used only
+    * by the happy-path test below to prove the consumer no longer publishes
+    * directly (ADR 0008 Phase 2: the outbox write in `store.update` replaces
+    * this call entirely).
+    */
+  private def recordingPublisher(
+      countRef: Ref[IO, Int]
+  ): PaymentEventPublisher[IO] =
+    new PaymentEventPublisher[IO] {
+      def publishSettled(event: PaymentSettledEvent): IO[Unit] =
+        countRef.update(_ + 1)
+      def publishFailed(event: PaymentFailedEvent): IO[Unit] = IO.unit
+    }
 
   test(
-    "a synthetic OrderReserved envelope creates a settled Payment and publishes PaymentSettled"
+    "a synthetic OrderReserved envelope settles the Payment via the outbox-aware store, without calling the publisher directly"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
@@ -104,44 +128,43 @@ class OrderReservedConsumerSuite
         timestamp = Instant.parse("2026-01-01T00:00:00Z")
       )
       for {
-        store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher
-          .resource[IO](config, NoOpLogger[IO])
-          .use { publisher =>
-            for {
-              _ <- produce(
-                config,
-                OrderReservedConsumer.topic,
-                event.orderId,
-                envelopeJson("OrderReserved", event.orderId, event.asJson)
-              )
-              raced <- IO.race(
-                OrderReservedConsumer
-                  .run[IO](config, store, publisher, NoOpLogger[IO])
-                  .compile
-                  .drain,
-                consumeOne(config, PaymentEventPublisher.topic)
-              )
-            } yield raced
-          }
-        settledJson = raced match {
-          case Right(json) => json
-          case Left(_)     =>
-            fail(
-              "consumer stream completed before a PaymentSettled message arrived"
-            )
-        }
-        settledEnvelope <- IO.fromEither(decode[EventEnvelope](settledJson))
-        settledEvent <- IO.fromEither(
-          settledEnvelope.payload.as[PaymentSettledEvent]
+        underlying <- PaymentStore.inMemory[IO]
+        settledRef <- Ref.of[IO, Option[Payment]](None)
+        publishCount <- Ref.of[IO, Int](0)
+        store = observingStore(underlying, settledRef)
+        publisher = recordingPublisher(publishCount)
+        _ <- produce(
+          config,
+          OrderReservedConsumer.topic,
+          event.orderId,
+          envelopeJson("OrderReserved", event.orderId, event.asJson)
         )
-        stored <- store.get(settledEvent.paymentId)
+        raced <- IO.race(
+          OrderReservedConsumer
+            .run[IO](config, store, publisher, NoOpLogger[IO])
+            .compile
+            .drain,
+          awaitSettled(settledRef)
+        )
+        settled = raced match {
+          case Right(payment) => payment
+          case Left(_)         =>
+            fail("consumer stream completed before the payment settled")
+        }
+        // The old direct-publish call, if it still existed, would have fired
+        // synchronously right after the same store.update this already
+        // raced on - this buffer is for scheduling, not a real race.
+        _ <- IO.sleep(500.millis)
+        finalCount <- publishCount.get
       } yield {
-        assertEquals(settledEnvelope.eventType, "PaymentSettled")
-        assertEquals(settledEvent.orderId, event.orderId)
-        assertEquals(settledEvent.amountCents, event.totalCents)
-        assertEquals(stored.map(_.status), Some(PaymentStatus.Settled))
-        assertEquals(stored.map(_.orderId), Some(event.orderId))
+        assertEquals(settled.orderId, event.orderId)
+        assertEquals(settled.amountCents, event.totalCents)
+        assertEquals(settled.status, PaymentStatus.Settled)
+        assertEquals(
+          finalCount,
+          0,
+          "publisher.publishSettled should no longer be called - the outbox write inside store.update replaces it"
+        )
       }
     }
   }
@@ -158,48 +181,40 @@ class OrderReservedConsumerSuite
         timestamp = Instant.parse("2026-01-01T00:00:00Z")
       )
       for {
-        store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher
-          .resource[IO](config, NoOpLogger[IO])
-          .use { publisher =>
-            for {
-              _ <- produce(
-                config,
-                OrderReservedConsumer.topic,
-                "order-other-1",
-                envelopeJson(
-                  "OrderStatusChanged",
-                  "order-other-1",
-                  Json.obj(
-                    "orderId" -> Json.fromString("order-other-1"),
-                    "customerId" -> Json.fromString("cust-x"),
-                    "status" -> Json.fromString("confirmed"),
-                    "timestamp" -> Json.fromString("2026-01-01T00:00:00Z")
-                  )
-                )
-              )
-              _ <- produce(
-                config,
-                OrderReservedConsumer.topic,
-                goodEvent.orderId,
-                envelopeJson(
-                  "OrderReserved",
-                  goodEvent.orderId,
-                  goodEvent.asJson
-                )
-              )
-              raced <- IO.race(
-                OrderReservedConsumer
-                  .run[IO](config, store, publisher, NoOpLogger[IO])
-                  .compile
-                  .drain,
-                consumeOne(config, PaymentEventPublisher.topic)
-              )
-            } yield raced
-          }
+        underlying <- PaymentStore.inMemory[IO]
+        settledRef <- Ref.of[IO, Option[Payment]](None)
+        store = observingStore(underlying, settledRef)
+        _ <- produce(
+          config,
+          OrderReservedConsumer.topic,
+          "order-other-1",
+          envelopeJson(
+            "OrderStatusChanged",
+            "order-other-1",
+            Json.obj(
+              "orderId" -> Json.fromString("order-other-1"),
+              "customerId" -> Json.fromString("cust-x"),
+              "status" -> Json.fromString("confirmed"),
+              "timestamp" -> Json.fromString("2026-01-01T00:00:00Z")
+            )
+          )
+        )
+        _ <- produce(
+          config,
+          OrderReservedConsumer.topic,
+          goodEvent.orderId,
+          envelopeJson("OrderReserved", goodEvent.orderId, goodEvent.asJson)
+        )
+        raced <- IO.race(
+          OrderReservedConsumer
+            .run[IO](config, store, PaymentEventPublisher.noOp[IO], NoOpLogger[IO])
+            .compile
+            .drain,
+          awaitSettled(settledRef)
+        )
       } yield assert(
         raced.isRight,
-        s"expected the OrderReserved event to still produce a PaymentSettled message despite the earlier differently-typed one, got: $raced"
+        s"expected the OrderReserved event to still settle the payment despite the earlier differently-typed one, got: $raced"
       )
     }
   }
@@ -216,39 +231,31 @@ class OrderReservedConsumerSuite
         timestamp = Instant.parse("2026-01-01T00:00:00Z")
       )
       for {
-        store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher
-          .resource[IO](config, NoOpLogger[IO])
-          .use { publisher =>
-            for {
-              _ <- produce(
-                config,
-                OrderReservedConsumer.topic,
-                "bad-key",
-                "not-json"
-              )
-              _ <- produce(
-                config,
-                OrderReservedConsumer.topic,
-                goodEvent.orderId,
-                envelopeJson(
-                  "OrderReserved",
-                  goodEvent.orderId,
-                  goodEvent.asJson
-                )
-              )
-              raced <- IO.race(
-                OrderReservedConsumer
-                  .run[IO](config, store, publisher, NoOpLogger[IO])
-                  .compile
-                  .drain,
-                consumeOne(config, PaymentEventPublisher.topic)
-              )
-            } yield raced
-          }
+        underlying <- PaymentStore.inMemory[IO]
+        settledRef <- Ref.of[IO, Option[Payment]](None)
+        store = observingStore(underlying, settledRef)
+        _ <- produce(
+          config,
+          OrderReservedConsumer.topic,
+          "bad-key",
+          "not-json"
+        )
+        _ <- produce(
+          config,
+          OrderReservedConsumer.topic,
+          goodEvent.orderId,
+          envelopeJson("OrderReserved", goodEvent.orderId, goodEvent.asJson)
+        )
+        raced <- IO.race(
+          OrderReservedConsumer
+            .run[IO](config, store, PaymentEventPublisher.noOp[IO], NoOpLogger[IO])
+            .compile
+            .drain,
+          awaitSettled(settledRef)
+        )
       } yield assert(
         raced.isRight,
-        s"expected the good event to still produce a PaymentSettled message despite the earlier malformed one, got: $raced"
+        s"expected the good event to still settle the payment despite the earlier malformed one, got: $raced"
       )
     }
   }
@@ -265,38 +272,30 @@ class OrderReservedConsumerSuite
         timestamp = Instant.parse("2026-01-01T00:00:00Z")
       )
       for {
-        store <- PaymentStore.inMemory[IO]
-        raced <- PaymentEventPublisher
-          .resource[IO](config, NoOpLogger[IO])
-          .use { publisher =>
-            for {
-              _ <- produceNullKey(
-                config,
-                OrderReservedConsumer.topic,
-                "{\"irrelevant\":\"null-key record\"}"
-              )
-              _ <- produce(
-                config,
-                OrderReservedConsumer.topic,
-                goodEvent.orderId,
-                envelopeJson(
-                  "OrderReserved",
-                  goodEvent.orderId,
-                  goodEvent.asJson
-                )
-              )
-              raced <- IO.race(
-                OrderReservedConsumer
-                  .run[IO](config, store, publisher, NoOpLogger[IO])
-                  .compile
-                  .drain,
-                consumeOne(config, PaymentEventPublisher.topic)
-              )
-            } yield raced
-          }
+        underlying <- PaymentStore.inMemory[IO]
+        settledRef <- Ref.of[IO, Option[Payment]](None)
+        store = observingStore(underlying, settledRef)
+        _ <- produceNullKey(
+          config,
+          OrderReservedConsumer.topic,
+          "{\"irrelevant\":\"null-key record\"}"
+        )
+        _ <- produce(
+          config,
+          OrderReservedConsumer.topic,
+          goodEvent.orderId,
+          envelopeJson("OrderReserved", goodEvent.orderId, goodEvent.asJson)
+        )
+        raced <- IO.race(
+          OrderReservedConsumer
+            .run[IO](config, store, PaymentEventPublisher.noOp[IO], NoOpLogger[IO])
+            .compile
+            .drain,
+          awaitSettled(settledRef)
+        )
       } yield assert(
         raced.isRight,
-        s"expected the good event to still produce a PaymentSettled message despite the earlier null-keyed one, got: $raced"
+        s"expected the good event to still settle the payment despite the earlier null-keyed one, got: $raced"
       )
     }
   }
