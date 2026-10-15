@@ -2,7 +2,7 @@
 
 This file tracks all major tracks for the project.
 
-- [ ] **Track: Transactional outbox for payment-service (TD-3.4, ADR 0008)**
+- [x] **Track: Transactional outbox for payment-service (TD-3.4, ADR 0008)**
   *Link: [./tracks/outbox_20261012/](./tracks/outbox_20261012/)*
 
 ---
