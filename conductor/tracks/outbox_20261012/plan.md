@@ -9,7 +9,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Outbox table + atomic settle write' (Protocol in workflow.md) `4391b80` — reduced-prompting mode: automated-test verification only (77 passed), no interactive walkthrough; see git note on `4391b80`
 
 ## Phase 2 — Wire OrderReservedConsumer to the outbox, not the publisher
-- [ ] Task: `OrderReservedConsumer`'s `handleEvent`: replace the `publisher.publishSettled(...)` call with passing the envelope inputs into `store.update` (Red: existing consumer test asserts outbox row rather than publisher invocation; Green: wire it)
+- [x] Task: `OrderReservedConsumer`'s `handleEvent`: replace the `publisher.publishSettled(...)` call with passing the envelope inputs into `store.update` (Red: existing consumer test asserts outbox row rather than publisher invocation; Green: wire it) `e5cf8e2` — deviation: no envelope inputs needed passing in (Phase 1's `store.update` already builds the full envelope internally); `OrderReservedConsumerSuite`'s 4 tests redesigned to observe settlement via a `Ref`-backed store wrapper instead of racing against a live `payment-events` Kafka message (the app no longer produces one), plus a recording-publisher double in the happy-path test proving `publishSettled` is called zero times — see git note on `e5cf8e2` for full detail
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Wire OrderReservedConsumer to the outbox' (Protocol in workflow.md)
 
 ## Phase 3 — Delete PaymentEventPublisher
