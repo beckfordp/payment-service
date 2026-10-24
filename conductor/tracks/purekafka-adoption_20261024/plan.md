@@ -52,7 +52,7 @@
       including a real Testcontainers-Kafka DLQ-routing test), no
       interactive walkthrough; see git note on `6160562`
 
-## Phase 3: AsyncAPI docs [checkpoint: PENDING]
+## Phase 3: AsyncAPI docs [checkpoint: fd0775d]
 - [x] Task: Add tapir `Schema.derived` to `OrderReservedEvent`
       (`OrderReservedConsumer.scala`) and `PaymentSettledEvent`
       (`PaymentEvents.scala`) — not `PaymentFailedEvent` (never actually
@@ -72,5 +72,8 @@
 - [x] Task: Run full test suite + verify script end-to-end — 75/75
       passing, scalafmtCheck clean, verify script all green (build-time
       generation + live raw-spec + live static HTML)
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: AsyncAPI docs'
-      (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: AsyncAPI docs'
+      (Protocol in workflow.md) `fd0775d` — reduced-prompting mode:
+      end-to-end script verification only
+      (`./scripts/verify-kafka-asyncapi-docs.sh`, all checks passed); see
+      git note on `fd0775d`
