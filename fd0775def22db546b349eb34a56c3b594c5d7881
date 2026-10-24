@@ -1,0 +1,15 @@
+Phase 3 Verification Report — AsyncAPI docs
+
+Automated + end-to-end verification command: ./scripts/verify-kafka-asyncapi-docs.sh
+Result: all checks passed - build-time spec/HTML generation (sbt
+asyncApiGenerate), live raw-spec route (/docs/asyncapi.json), live static
+HTML route (/docs/asyncapi/), both event types (OrderReserved,
+PaymentSettled) present throughout.
+
+Manual verification: this script run IS the manual-verification substitute
+(reduced-prompting mode, .claude/prompt-off) - a real end-to-end check
+against a running instance + docker compose (postgres, kafka), not an
+interactive walkthrough.
+
+Track complete - this closes the payment-service portion of gluon/PLAN.md
+Rework 3's "Adopt across..." bullet and TD-2.4's payment-service gap.
