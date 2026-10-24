@@ -18,31 +18,34 @@
       mode: automated-test verification only (74 passed), no interactive
       walkthrough; see git note on `175c847`
 
-## Phase 2: StreamSupervisor + DeadLetter adoption (TD-2.4)
-- [ ] Task: `KafkaConfig` gains `dlqRetry`/`dlqPublishResilience`/
+## Phase 2: StreamSupervisor + DeadLetter adoption (TD-2.4) [checkpoint: PENDING]
+- [x] Task: `KafkaConfig` gains `dlqRetry`/`dlqPublishResilience`/
       `streamSupervisor` fields (mirroring `OrderServiceConfig.KafkaConfig`
-      exactly) + `application.conf` keys
-- [ ] Task: Bump `io.github.beckfordp:purekafka` to 0.2.1
-- [ ] Task: `OrderReservedConsumer.run` gains a `deadLetter: DeadLetter[F,
+      exactly) + `application.conf` keys `10edae9`
+- [x] Task: Bump `io.github.beckfordp:purekafka` to 0.2.1 `10edae9`
+- [x] Task: `OrderReservedConsumer.run` gains a `deadLetter: DeadLetter[F,
       String, String]` param; wrap `handleEvent(...)` in
       `deadLetter.guard(topic, key, raw)(...)`. Update the 4 existing test
       call sites in `OrderReservedConsumerSuite.scala` with a no-op
       `DeadLetter` (mirroring order-service's `PaymentEventConsumerSuite`'s
-      `noOpDeadLetter` helper)
-- [ ] Task: New `KafkaConsumers.scala` — `resource[F[_]: Async](config,
+      `noOpDeadLetter` helper) `10edae9`
+- [x] Task: New `KafkaConsumers.scala` — `resource[F[_]: Async](config,
       store, logger, meter): Resource[F, Unit]`, wrapping
       `OrderReservedConsumer.run` in `StreamSupervisor.supervise` +
       backgrounding (single-consumer version of order-service's, no
-      `.merge`)
-- [ ] Task: New `KafkaConsumersSuite.scala` — Testcontainers-Kafka tests
-      proving (a) `StreamSupervisor` restarts on a synthetic crash, (b) a
-      permanently-failing message is routed to `order-events-dlq` and the
-      stream keeps consuming later messages, mirroring order-service's
-      `KafkaConsumersSuite` pattern (including its "`DeadLetter` swallows
-      errors before they reach `StreamSupervisor`" finding — a
-      crash-triggering case needs a *different* failure injection than a
-      DLQ-routing case)
-- [ ] Task: Wire `KafkaConsumers.resource` into `Main.scala`
+      `.merge`) `10edae9`
+- [x] Task: New `KafkaConsumersSuite.scala` `10edae9` — deviation: only the
+      DLQ-routing test was adapted, not a "StreamSupervisor restarts on a
+      synthetic crash" test. payment-service has one consumer, not two, so
+      there's no merge-isolation property to prove (order-service's
+      equivalent synthetic-crash test specifically proves that merging two
+      individually-supervised streams isolates a crash in one from the
+      other — not applicable here). `StreamSupervisor`'s generic
+      restart-with-backoff behavior is already proven by `purekafka`'s own
+      `StreamSupervisorSuite`; re-proving it again through this thin
+      wrapper would add no wiring-specific value. See the suite's own doc
+      comment.
+- [x] Task: Wire `KafkaConsumers.resource` into `Main.scala` `10edae9`
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: StreamSupervisor
       + DeadLetter adoption' (Protocol in workflow.md)
 
