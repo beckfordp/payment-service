@@ -20,10 +20,21 @@
   order-service's (US-5.2) choice. Plain `String` key/value, hand-rolled
   circe JSON (no circe-kafka serializer layer) — same convention already
   established cross-repo.
+- purekafka (`io.github.beckfordp`) — `consumer.StreamSupervisor` wraps
+  `OrderReservedConsumer`'s stream (restart-with-backoff) and
+  `consumer.DeadLetter` wraps its per-message processing (bounded retry,
+  then routes to `order-events-dlq` on exhaustion) — TD-2.4, ADR 0010.
+  Wired together in `KafkaConsumers.supervised`.
 
 ## API layer
 - tapir 1.11.25 — route definitions and generated Swagger/OpenAPI docs
   (`purerest.docs.Docs`), served at `/docs`, kept in sync by construction
+- purekafka.docs (`AsyncApiChannel`/`Docs`) — generates AsyncAPI documentation
+  for this service's Kafka event contracts (`AsyncApiChannels`), served at
+  `/docs/asyncapi.json` (raw spec) and `/docs/asyncapi` (rendered static HTML)
+  — same tapir-OpenAPI pattern, for the Kafka side. Generation handled by the
+  `sbt-purekafka-docs` plugin, auto-chained after `Compile / compile` — no
+  manual script needed (ADR 0010).
 
 ## Persistence
 - skunk 1.0.0 — pure-FP, non-blocking Postgres access (runtime queries)
