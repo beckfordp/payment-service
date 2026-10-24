@@ -1,0 +1,10 @@
+Phase 2 Verification Report — StreamSupervisor + DeadLetter adoption
+
+Automated test command: sbt scalafmtCheck test
+Result: 75/75 tests passing (including KafkaConsumersSuite's real
+Testcontainers-Kafka DLQ-routing test), scalafmtCheck clean.
+
+Manual verification: skipped (reduced-prompting mode, .claude/prompt-off) -
+the new KafkaConsumersSuite test already exercises real Kafka end-to-end
+(poison message routed to order-events-dlq, healthy message still
+processed), which is more rigorous than a manual walkthrough would add.
