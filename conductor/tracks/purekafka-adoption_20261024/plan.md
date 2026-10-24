@@ -1,17 +1,18 @@
 # Plan — purekafka adoption + AsyncAPI docs for payment-service (TD-2.4, ADR 0010)
 
-## Phase 1: Main.scala restructure (Telemetry + AppRoutes)
-- [ ] Task: New `Telemetry.scala` (tracer/meter/logger bundle), mirroring
-      order-service's/inventory-service's exactly
-- [ ] Task: New `AppRoutes.scala` — `def all[F[_]: Async](store,
+## Phase 1: Main.scala restructure (Telemetry + AppRoutes) [checkpoint: PENDING]
+- [x] Task: New `Telemetry.scala` (tracer/meter/logger bundle), mirroring
+      order-service's/inventory-service's exactly `2bb4275`
+- [x] Task: New `AppRoutes.scala` — `def all[F[_]: Async](store,
       telemetry): HttpRoutes[F]`, moving the existing docsRoutes/CORS/
       tracing/metrics assembly out of `Main.scala` verbatim (no AsyncAPI
-      routes yet — added in Phase 3)
-- [ ] Task: Rewrite `Main.scala` as a flat `Resource` for-comprehension
+      routes yet — added in Phase 3) `2bb4275`
+- [x] Task: Rewrite `Main.scala` as a flat `Resource` for-comprehension
       calling `AppRoutes.all` (consumer wiring stays inline for now —
-      extracted into `KafkaConsumers` in Phase 2)
-- [ ] Task: Run full test suite, confirm no regressions (no new tests
-      needed — pure refactor, existing suite proves behavior unchanged)
+      extracted into `KafkaConsumers` in Phase 2) `2bb4275`
+- [x] Task: Run full test suite, confirm no regressions (no new tests
+      needed — pure refactor, existing suite proves behavior unchanged) —
+      74/74 passing, scalafmtCheck clean
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Main.scala
       restructure' (Protocol in workflow.md)
 
