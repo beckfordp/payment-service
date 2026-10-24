@@ -36,11 +36,23 @@ ThisBuild / dependencyOverrides ++= Seq(
 
 lazy val root = project
   .in(file("."))
-  .enablePlugins(JavaAppPackaging, DockerPlugin)
+  .enablePlugins(JavaAppPackaging, DockerPlugin, PureKafkaDocsPlugin)
   .settings(
     name := "payment-service",
     scalaVersion := scala3Version,
     version := "0.1.0",
+    // Drives the sbt-purekafka-docs plugin's asyncApiGenerateSpec/
+    // asyncApiGenerate tasks, auto-chained after Compile/compile - see
+    // AsyncApiChannels.scala (paymentservice.AsyncApiChannels, an
+    // AsyncApiChannelsProvider). Title/version match Main.scala's own
+    // AsyncApiDocs.routes[IO]("Payment Service", "1.0", ...) call for the
+    // live /docs/asyncapi.json route - otherwise the build-time generated
+    // docs default to name.value/version.value
+    // ("payment-service"/"0.1.0") and silently disagree with what's
+    // actually served live.
+    asyncApiChannelsClass := "paymentservice.AsyncApiChannels",
+    asyncApiTitle := "Payment Service",
+    asyncApiVersion := "1.0",
     // purerestlib resolved as an ordinary published artifact from GitHub
     // Packages, not a source/`.dependsOn` link back to the purerest repo —
     // the same real-external-consumer proof purerest's own smoke-test/

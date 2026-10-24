@@ -2,6 +2,7 @@ package paymentservice
 
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
+import sttp.tapir.Schema
 
 import java.time.Instant
 
@@ -21,6 +22,7 @@ final case class PaymentSettledEvent(
 
 object PaymentSettledEvent {
   implicit val codec: Codec[PaymentSettledEvent] = deriveCodec
+  implicit val schema: Schema[PaymentSettledEvent] = Schema.derived
 }
 
 final case class PaymentFailedEvent(

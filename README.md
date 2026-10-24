@@ -54,6 +54,27 @@ curl http://localhost:8080/health/ready
 Swagger UI (generated from the same tapir endpoint definitions as the real routes — see
 `purerest.docs.Docs`) is browsable at **http://localhost:8080/docs**.
 
+## View Kafka AsyncAPI docs
+
+`OrderReservedConsumer` consumes `OrderReserved` on `order-events`, and this service publishes
+`PaymentSettled` on `payment-events` (via its outbox table + Debezium CDC, not a direct producer
+call). Both event types are registered for [AsyncAPI](https://www.asyncapi.com/) documentation via
+`purekafka.docs` (see `AsyncApiChannels`), the same way tapir generates the OpenAPI docs above.
+(`PaymentFailedEvent` isn't registered — it's defined but never actually published today.)
+
+Generation is handled by the `sbt-purekafka-docs` plugin (`asyncApiChannelsClass` in `build.sbt`),
+auto-chained after `Compile / compile` — every `sbt compile`/`run`/`Docker/publishLocal` already
+regenerates both files locally, no running server or manual script needed. Run it directly with:
+```
+sbt asyncApiGenerate
+```
+
+- **Raw spec** — generated at `target/asyncapi-docs-spec/asyncapi.json`; also served live at
+  http://localhost:8080/docs/asyncapi.json while the service is running.
+- **Rendered HTML** — generated at `target/asyncapi-docs/index.html`
+  (`open target/asyncapi-docs/index.html`); also served live at
+  http://localhost:8080/docs/asyncapi/index.html while the service is running.
+
 ## Development guidelines
 
 Extending this service? See [`development-guidelines.md`](./development-guidelines.md) for the

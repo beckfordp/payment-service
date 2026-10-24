@@ -39,7 +39,7 @@ object Main extends IOApp.Simple {
       telemetry.logger,
       telemetry.meter
     )
-    routes = AppRoutes.all[IO](store, telemetry)
+    routes = AppRoutes.all[IO](store, telemetry, AsyncApiChannels.channels)
     _ <- EmberServerBuilder
       .default[IO]
       .withHost(host"0.0.0.0")

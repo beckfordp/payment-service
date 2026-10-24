@@ -9,6 +9,7 @@ import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
 import purekafka.consumer.DeadLetter
+import sttp.tapir.Schema
 
 import java.time.Instant
 
@@ -26,6 +27,7 @@ final case class OrderReservedEvent(
 
 object OrderReservedEvent {
   implicit val codec: Codec[OrderReservedEvent] = deriveCodec
+  implicit val schema: Schema[OrderReservedEvent] = Schema.derived
 }
 
 /** Consumes `OrderReserved` envelopes on `order-events` (US-6.1; migrated to
