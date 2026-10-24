@@ -8,6 +8,13 @@ import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.noop.NoOpLogger
+import org.typelevel.otel4s.metrics.Meter
+import purekafka.consumer.DeadLetter
+import purekafka.resilience.{
+  CircuitBreakerConfig,
+  ResilienceConfig,
+  RetryConfig
+}
 
 import java.time.Instant
 import java.util.UUID
@@ -16,6 +23,24 @@ import scala.concurrent.duration._
 class OrderReservedConsumerSuite
     extends CatsEffectSuite
     with TestContainerForAll {
+
+  /** A `DeadLetter` whose `guard` never actually triggers in these tests -
+    * every `handleEvent` call here succeeds on its first attempt, so this is
+    * only ever a transparent pass-through. `KafkaConsumersSuite` is where DLQ
+    * routing itself (the failure path) is actually exercised.
+    */
+  private def noOpDeadLetter: IO[DeadLetter[IO, String, String]] = {
+    import org.typelevel.otel4s.metrics.Meter.Implicits.noop
+    DeadLetter.fromPublish[IO, String, String](
+      RetryConfig(maxRetries = 0, baseDelay = 1.milli),
+      ResilienceConfig(
+        retry = RetryConfig(maxRetries = 0, baseDelay = 1.milli),
+        circuitBreaker =
+          CircuitBreakerConfig(failureThreshold = 100, resetTimeout = 1.second)
+      ),
+      (_, _, _) => IO.unit
+    )(NoOpLogger[IO])(summon[Meter[IO]])
+  }
 
   override val containerDef: KafkaContainer.Def = KafkaContainer.Def()
 
@@ -117,6 +142,7 @@ class OrderReservedConsumerSuite
         underlying <- PaymentStore.inMemory[IO]
         settledRef <- Ref.of[IO, Option[Payment]](None)
         store = observingStore(underlying, settledRef)
+        deadLetter <- noOpDeadLetter
         _ <- produce(
           config,
           OrderReservedConsumer.topic,
@@ -125,7 +151,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO], deadLetter)
             .compile
             .drain,
           awaitSettled(settledRef)
@@ -158,6 +184,7 @@ class OrderReservedConsumerSuite
         underlying <- PaymentStore.inMemory[IO]
         settledRef <- Ref.of[IO, Option[Payment]](None)
         store = observingStore(underlying, settledRef)
+        deadLetter <- noOpDeadLetter
         _ <- produce(
           config,
           OrderReservedConsumer.topic,
@@ -181,7 +208,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO], deadLetter)
             .compile
             .drain,
           awaitSettled(settledRef)
@@ -208,6 +235,7 @@ class OrderReservedConsumerSuite
         underlying <- PaymentStore.inMemory[IO]
         settledRef <- Ref.of[IO, Option[Payment]](None)
         store = observingStore(underlying, settledRef)
+        deadLetter <- noOpDeadLetter
         _ <- produce(
           config,
           OrderReservedConsumer.topic,
@@ -222,7 +250,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO], deadLetter)
             .compile
             .drain,
           awaitSettled(settledRef)
@@ -249,6 +277,7 @@ class OrderReservedConsumerSuite
         underlying <- PaymentStore.inMemory[IO]
         settledRef <- Ref.of[IO, Option[Payment]](None)
         store = observingStore(underlying, settledRef)
+        deadLetter <- noOpDeadLetter
         _ <- produceNullKey(
           config,
           OrderReservedConsumer.topic,
@@ -262,7 +291,7 @@ class OrderReservedConsumerSuite
         )
         raced <- IO.race(
           OrderReservedConsumer
-            .run[IO](config, store, NoOpLogger[IO])
+            .run[IO](config, store, NoOpLogger[IO], deadLetter)
             .compile
             .drain,
           awaitSettled(settledRef)

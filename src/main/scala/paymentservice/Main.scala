@@ -1,8 +1,6 @@
 package paymentservice
 
 import cats.effect.{IO, IOApp, Resource}
-import cats.effect.syntax.all._
-import cats.syntax.all._
 import com.comcast.ip4s._
 import org.http4s.ember.server.EmberServerBuilder
 
@@ -11,9 +9,7 @@ import org.http4s.ember.server.EmberServerBuilder
   * dependency, per the composition pattern documented in `purerest`'s
   * `docs/functional-design-patterns-scala-haskell-category-theory.md` ("Scaling
   * tagless final without Cake: bundling dependencies into `Resource`-built
-  * modules"). Mirrors order-service's own `Main.scala`. `OrderReservedConsumer`
-  * is backgrounded inline here for now - extracted into `KafkaConsumers` once
-  * it adopts `StreamSupervisor`/`DeadLetter` (TD-2.4).
+  * modules"). Mirrors order-service's own `Main.scala`.
   */
 object Main extends IOApp.Simple {
 
@@ -37,12 +33,12 @@ object Main extends IOApp.Simple {
       )("payment-service starting")
     )
     store <- PaymentStore.postgres[IO](config.postgres, telemetry.meter)
-    _ <- OrderReservedConsumer
-      .run[IO](config.kafka, store, telemetry.logger)
-      .compile
-      .drain
-      .background
-      .void
+    _ <- KafkaConsumers.resource[IO](
+      config.kafka,
+      store,
+      telemetry.logger,
+      telemetry.meter
+    )
     routes = AppRoutes.all[IO](store, telemetry)
     _ <- EmberServerBuilder
       .default[IO]

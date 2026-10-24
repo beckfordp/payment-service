@@ -8,6 +8,7 @@ import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
+import purekafka.consumer.DeadLetter
 
 import java.time.Instant
 
@@ -33,13 +34,16 @@ object OrderReservedEvent {
   * provider decided yet, see the ADR backlog item), and publishes
   * `PaymentSettled` on `payment-events`. `order-events` also carries other
   * event types (e.g. `OrderStatusChanged`) this consumer doesn't care about
-  *   - those are silently skipped by `eventType`, not logged as malformed. No
-  *     retry on the consume/processing side (a genuine decode failure is logged
-  *     and the offset still committed) - same at-least-once,
-  *     commit-after-process risk profile as order-service's own
-  *     `StockEventConsumer`. No duplicate-delivery guard: a redelivered
-  *     `OrderReserved` creates a second `Payment` row for the same `orderId` -
-  *     that's US-6.2's job (Redis idempotency keys), not this track's.
+  *   - those are silently skipped by `eventType`, not logged as malformed. A
+  *     decode failure (null value, envelope, or payload) is logged and the
+  *     offset still committed - no retry, an already-accepted gap. Only the
+  *     *processing* step (`handleEvent`) is wrapped in
+  *     `purekafka.consumer.DeadLetter.guard` (TD-2.4, ADR 0010): bounded retry,
+  *     then `order-events-dlq` on exhaustion - mirroring order-service's own
+  *     consumers' convention exactly. No duplicate-delivery guard: a
+  *     redelivered `OrderReserved` creates a second `Payment` row for the same
+  *     `orderId` - that's US-6.2's job (Redis idempotency keys), not this
+  *     track's.
   */
 object OrderReservedConsumer {
 
@@ -64,7 +68,8 @@ object OrderReservedConsumer {
   def run[F[_]: Async](
       config: KafkaConfig,
       store: PaymentStore[F],
-      logger: StructuredLogger[F]
+      logger: StructuredLogger[F],
+      deadLetter: DeadLetter[F, String, String]
   ): Stream[F, Unit] =
     KafkaConsumer
       .stream(consumerSettings[F](config))
@@ -100,6 +105,8 @@ object OrderReservedConsumer {
             }
           } yield ()
 
+        val key = committable.record.key.getOrElse("")
+
         val handled: F[Unit] = committable.record.value match {
           case None =>
             logger.error(Map.empty)(
@@ -121,7 +128,14 @@ object OrderReservedConsumer {
                       Map("raw" -> raw),
                       error
                     )("Failed to decode OrderReserved payload")
-                  case Right(event) => handleEvent(event)
+                  case Right(event) =>
+                    // Decode failures above are a different, already-accepted
+                    // gap (logged and dropped, never retried) - only a
+                    // message that decodes fine but fails *processing* (e.g.
+                    // a transient store error) gets the bounded-retry-then-DLQ
+                    // treatment, via purekafka.consumer.DeadLetter (TD-2.4,
+                    // ADR 0010).
+                    deadLetter.guard(topic, key, raw)(handleEvent(event))
                 }
             }
         }

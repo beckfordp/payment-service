@@ -13,6 +13,10 @@ val postgresqlJdbcVersion = "42.7.13"
 val pureconfigVersion = "0.17.10"
 val testcontainersScalaVersion = "0.43.6"
 val fs2KafkaVersion = "3.6.0"
+// purekafka: Kafka resilience/observability combinators + AsyncAPI docs
+// support (ADR 0010). Pinned to match order-service's/inventory-service's
+// own version.
+val purekafkaVersion = "0.2.1"
 // Pinned to match the purerestlib version this service is built against — see
 // README's "Consuming purerest as a dependency" section.
 val purerestlibVersion = "0.1.0"
@@ -61,6 +65,9 @@ lazy val root = project
       // fs2-kafka: pure-FP, FS2-native Kafka consumer/producer (US-6.1) -
       // subscribes to order.reserved, publishes payment.settled/payment.failed.
       "com.github.fd4s" %% "fs2-kafka" % fs2KafkaVersion,
+      // purekafka: StreamSupervisor (restart-with-backoff) + DeadLetter
+      // (bounded-retry-then-DLQ) for OrderReservedConsumer (TD-2.4, ADR 0010).
+      "io.github.beckfordp" %% "purekafka" % purekafkaVersion,
       "org.http4s" %% "http4s-ember-server" % http4sVersion,
       "org.http4s" %% "http4s-dsl" % http4sVersion,
       "org.http4s" %% "http4s-circe" % http4sVersion,
