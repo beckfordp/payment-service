@@ -52,22 +52,25 @@
       including a real Testcontainers-Kafka DLQ-routing test), no
       interactive walkthrough; see git note on `6160562`
 
-## Phase 3: AsyncAPI docs
-- [ ] Task: Add tapir `Schema.derived` to `OrderReservedEvent`
+## Phase 3: AsyncAPI docs [checkpoint: PENDING]
+- [x] Task: Add tapir `Schema.derived` to `OrderReservedEvent`
       (`OrderReservedConsumer.scala`) and `PaymentSettledEvent`
       (`PaymentEvents.scala`) — not `PaymentFailedEvent` (never actually
       published today, confirmed via `PaymentStore.update`'s outbox branch;
-      registering it would misdocument the system)
-- [ ] Task: New `AsyncApiChannels.scala` — `OrderReservedEvent` on
+      registering it would misdocument the system) `da33e90`
+- [x] Task: New `AsyncApiChannels.scala` — `OrderReservedEvent` on
       `order-events` (`Subscribe`), `PaymentSettledEvent` on
-      `payment-events` (`Publish(Cdc)`)
-- [ ] Task: `project/plugins.sbt` + `build.sbt` — `sbt-purekafka-docs`/
+      `payment-events` (`Publish(Cdc)`) `da33e90`
+- [x] Task: `project/plugins.sbt` + `build.sbt` — `sbt-purekafka-docs`/
       `PureKafkaDocsPlugin` wiring, same as inventory-service's track
-- [ ] Task: `AppRoutes.scala` gains the raw-spec + static-HTML AsyncAPI
+      `da33e90`
+- [x] Task: `AppRoutes.scala` gains the raw-spec + static-HTML AsyncAPI
       routes (same route-ordering fix), `channels` param added to
-      `AppRoutes.all`
-- [ ] Task: Adapt `verify-kafka-asyncapi-docs.sh` (own port)
-- [ ] Task: README "View Kafka AsyncAPI docs" section
-- [ ] Task: Run full test suite + verify script end-to-end
+      `AppRoutes.all` `da33e90`
+- [x] Task: Adapt `verify-kafka-asyncapi-docs.sh` (own port) `da33e90`
+- [x] Task: README "View Kafka AsyncAPI docs" section `da33e90`
+- [x] Task: Run full test suite + verify script end-to-end — 75/75
+      passing, scalafmtCheck clean, verify script all green (build-time
+      generation + live raw-spec + live static HTML)
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: AsyncAPI docs'
       (Protocol in workflow.md)
