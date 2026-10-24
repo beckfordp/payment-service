@@ -1,6 +1,6 @@
 # Plan — purekafka adoption + AsyncAPI docs for payment-service (TD-2.4, ADR 0010)
 
-## Phase 1: Main.scala restructure (Telemetry + AppRoutes) [checkpoint: PENDING]
+## Phase 1: Main.scala restructure (Telemetry + AppRoutes) [checkpoint: 175c847]
 - [x] Task: New `Telemetry.scala` (tracer/meter/logger bundle), mirroring
       order-service's/inventory-service's exactly `2bb4275`
 - [x] Task: New `AppRoutes.scala` — `def all[F[_]: Async](store,
@@ -13,8 +13,10 @@
 - [x] Task: Run full test suite, confirm no regressions (no new tests
       needed — pure refactor, existing suite proves behavior unchanged) —
       74/74 passing, scalafmtCheck clean
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Main.scala
-      restructure' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Main.scala
+      restructure' (Protocol in workflow.md) `175c847` — reduced-prompting
+      mode: automated-test verification only (74 passed), no interactive
+      walkthrough; see git note on `175c847`
 
 ## Phase 2: StreamSupervisor + DeadLetter adoption (TD-2.4)
 - [ ] Task: `KafkaConfig` gains `dlqRetry`/`dlqPublishResilience`/
