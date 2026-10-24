@@ -18,7 +18,7 @@
       mode: automated-test verification only (74 passed), no interactive
       walkthrough; see git note on `175c847`
 
-## Phase 2: StreamSupervisor + DeadLetter adoption (TD-2.4) [checkpoint: PENDING]
+## Phase 2: StreamSupervisor + DeadLetter adoption (TD-2.4) [checkpoint: 6160562]
 - [x] Task: `KafkaConfig` gains `dlqRetry`/`dlqPublishResilience`/
       `streamSupervisor` fields (mirroring `OrderServiceConfig.KafkaConfig`
       exactly) + `application.conf` keys `10edae9`
@@ -46,8 +46,11 @@
       wrapper would add no wiring-specific value. See the suite's own doc
       comment.
 - [x] Task: Wire `KafkaConsumers.resource` into `Main.scala` `10edae9`
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: StreamSupervisor
-      + DeadLetter adoption' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: StreamSupervisor
+      + DeadLetter adoption' (Protocol in workflow.md) `6160562` —
+      reduced-prompting mode: automated-test verification only (75 passed,
+      including a real Testcontainers-Kafka DLQ-routing test), no
+      interactive walkthrough; see git note on `6160562`
 
 ## Phase 3: AsyncAPI docs
 - [ ] Task: Add tapir `Schema.derived` to `OrderReservedEvent`
