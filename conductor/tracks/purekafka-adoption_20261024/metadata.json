@@ -1,0 +1,8 @@
+{
+  "track_id": "purekafka-adoption_20261024",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-10-24T15:55:55Z",
+  "updated_at": "2026-10-24T15:55:55Z",
+  "description": "purekafka adoption + AsyncAPI docs for payment-service (TD-2.4, ADR 0010). Restructures Main.scala to a Telemetry/AppRoutes/KafkaConsumers shape mirroring order-service's and inventory-service's own; adopts purekafka's StreamSupervisor (restart-with-backoff) and DeadLetter (bounded-retry-then-DLQ) on OrderReservedConsumer, closing TD-2.4's payment-service gap; wires AsyncAPI documentation for the consumed order-events (OrderReserved, Subscribe) and published payment-events (PaymentSettled, Publish(Cdc) — PaymentFailedEvent excluded since PaymentStore.update never actually publishes it today). Closes the payment-service portion of gluon/PLAN.md Rework 3's 'Adopt across...' bullet."
+}
