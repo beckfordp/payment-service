@@ -1,0 +1,8 @@
+Phase 2: Real CI wiring — verification is the real GitHub Actions run itself, no interactive walkthrough (reduced-prompting mode).
+
+- Added the same docker-run-based throwaway Apicurio Registry CI step
+  shape as order-service's/inventory-service's.
+- GH_PACKAGES_TOKEN was missing (same pre-existing gap); user added it
+  (first attempt didn't take for an unclear reason, second did).
+- CI run 40185935902: all steps green on the first real run, including
+  schemaRegistryCheck against the throwaway container.
