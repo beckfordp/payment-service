@@ -1,6 +1,6 @@
 # Plan — Adopt build-time schema registry check (Rework 5 step 3, ADR 0003)
 
-## Phase 1: Local sbt wiring + verification against the real OrbStack Apicurio instance [checkpoint: TBD]
+## Phase 1: Local sbt wiring + verification against the real OrbStack Apicurio instance [checkpoint: ddba59f]
 - [x] Task: Bump `project/plugins.sbt`'s `sbt-purekafka-docs` `0.1.0-dev`
       -> `0.2.0-dev`; bump `build.sbt`'s `purekafkaVersion` `0.2.1` ->
       `0.3.0` `27b8d07`
@@ -22,8 +22,11 @@
       ran `Test/scalafmt` (whitespace-only diff, no behavior change),
       then `scalafmtCheck; Test/scalafmtCheck; test`: clean, exit 0;
       verify script: all checks passed
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Local sbt
-      wiring + verification' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Local sbt
+      wiring + verification' (Protocol in workflow.md) `ddba59f` —
+      reduced-prompting mode: automated-test + verify-script
+      verification only, no interactive walkthrough; see git note on
+      `ddba59f`
 
 ## Phase 2: Real CI wiring
 - [ ] Task: Add the same `docker run` Apicurio CI step shape as the
