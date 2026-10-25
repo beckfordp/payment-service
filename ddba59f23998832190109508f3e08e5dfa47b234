@@ -1,0 +1,9 @@
+Phase 1: Local sbt wiring + verification against the real OrbStack Apicurio instance — reduced-prompting mode (prompt-off): automated-test + verify-script verification only, no interactive walkthrough.
+
+- scalafmtCheck; Test/scalafmtCheck; test: clean, exit 0, no regressions
+  (after fixing a pre-existing, unrelated scalafmt drift in 2 test files).
+- scripts/verify-schema-registry-check.sh: all checks passed against the
+  real local Apicurio instance — both real channels registered under the
+  real 'payment-service' group; second identical run a no-op.
+- Reused order-service's/inventory-service's settled design verbatim: no
+  new design questions asked.
