@@ -19,13 +19,13 @@ import scala.jdk.CollectionConverters._
   *
   * Unlike order-service's own `KafkaConsumersSuite` (which also proves a
   * *merge-isolation* property — wrapping two consumers individually, then
-  * merging, so a crash in one doesn't restart the other), payment-service
-  * has only one consumer: there's no merge, so no merge-isolation property
-  * to prove here. `StreamSupervisor`'s restart-with-backoff behavior itself
-  * is already proven by `purekafka`'s own `StreamSupervisorSuite` against a
-  * synthetic `Stream[F, O]` — re-proving that generic mechanism again here,
-  * through this thin single-consumer wrapper, would add no wiring-specific
-  * value. Only the DLQ-routing test is adapted.
+  * merging, so a crash in one doesn't restart the other), payment-service has
+  * only one consumer: there's no merge, so no merge-isolation property to prove
+  * here. `StreamSupervisor`'s restart-with-backoff behavior itself is already
+  * proven by `purekafka`'s own `StreamSupervisorSuite` against a synthetic
+  * `Stream[F, O]` — re-proving that generic mechanism again here, through this
+  * thin single-consumer wrapper, would add no wiring-specific value. Only the
+  * DLQ-routing test is adapted.
   */
 class KafkaConsumersSuite extends CatsEffectSuite with TestContainerForAll {
 
@@ -48,7 +48,11 @@ class KafkaConsumersSuite extends CatsEffectSuite with TestContainerForAll {
       .use(_.produceOne_(ProducerRecord(topic, key, json)).flatten.void)
   }
 
-  private def envelopeJson(eventType: String, correlationId: String, payload: io.circe.Json): String =
+  private def envelopeJson(
+      eventType: String,
+      correlationId: String,
+      payload: io.circe.Json
+  ): String =
     EventEnvelope(
       eventId = UUID.randomUUID().toString,
       eventType = eventType,
@@ -70,8 +74,8 @@ class KafkaConsumersSuite extends CatsEffectSuite with TestContainerForAll {
   /** Wraps a real `PaymentStore` with a side channel recording the one
     * `Settled` payment `update` produces - mirrors
     * `OrderReservedConsumerSuite`'s own `observingStore` helper. Only the
-    * healthy order ever reaches `update` (the poison order fails at
-    * `create`, below), so this ref only ever observes the healthy payment.
+    * healthy order ever reaches `update` (the poison order fails at `create`,
+    * below), so this ref only ever observes the healthy payment.
     */
   private def observingStore(
       underlying: PaymentStore[IO],

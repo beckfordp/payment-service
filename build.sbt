@@ -15,8 +15,9 @@ val testcontainersScalaVersion = "0.43.6"
 val fs2KafkaVersion = "3.6.0"
 // purekafka: Kafka resilience/observability combinators + AsyncAPI docs
 // support (ADR 0010). Pinned to match order-service's/inventory-service's
-// own version.
-val purekafkaVersion = "0.2.1"
+// own version (0.3.0 adds purekafka.docs.SchemaRegistryWriter, Rework 5
+// step 3/ADR 0003).
+val purekafkaVersion = "0.3.0"
 // Pinned to match the purerestlib version this service is built against — see
 // README's "Consuming purerest as a dependency" section.
 val purerestlibVersion = "0.1.0"
@@ -53,6 +54,17 @@ lazy val root = project
     asyncApiChannelsClass := "paymentservice.AsyncApiChannels",
     asyncApiTitle := "Payment Service",
     asyncApiVersion := "1.0",
+    // Drives schemaRegistryCheck (Rework 5 step 3, ADR 0003) - reuses the
+    // same AsyncApiChannels registrations above. Env-var override (not a
+    // hardcoded default) because local dev and CI point at two different,
+    // unrelated Apicurio instances: locally, the shared OrbStack cluster
+    // (default here); in CI, a throwaway `docker run` container with no
+    // OrbStack/cluster-DNS access (see ci.yml). schemaRegistryGroupId is
+    // left at the plugin's own default (name.value = "payment-service").
+    schemaRegistryUrl := sys.env.getOrElse(
+      "SCHEMA_REGISTRY_URL",
+      "http://apicurio-registry.gluon-local.svc.cluster.local:8080"
+    ),
     // purerestlib resolved as an ordinary published artifact from GitHub
     // Packages, not a source/`.dependsOn` link back to the purerest repo —
     // the same real-external-consumer proof purerest's own smoke-test/

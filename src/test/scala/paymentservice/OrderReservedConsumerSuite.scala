@@ -97,11 +97,11 @@ class OrderReservedConsumerSuite
       payload = payload
     ).asJson.noSpaces
 
-  /** Wraps a real `PaymentStore` with a side channel recording every
-    * `Settled` payment `update` produces - ADR 0008 moved the outbox write
-    * itself inside `PaymentStore.update` (Phase 1, no live Kafka needed to
-    * observe it), so these consumer-level tests no longer race against a
-    * real `payment-events` message; they poll this instead.
+  /** Wraps a real `PaymentStore` with a side channel recording every `Settled`
+    * payment `update` produces - ADR 0008 moved the outbox write itself inside
+    * `PaymentStore.update` (Phase 1, no live Kafka needed to observe it), so
+    * these consumer-level tests no longer race against a real `payment-events`
+    * message; they poll this instead.
     */
   private def observingStore(
       underlying: PaymentStore[IO],
@@ -158,7 +158,7 @@ class OrderReservedConsumerSuite
         )
         settled = raced match {
           case Right(payment) => payment
-          case Left(_)         =>
+          case Left(_)        =>
             fail("consumer stream completed before the payment settled")
         }
       } yield {
