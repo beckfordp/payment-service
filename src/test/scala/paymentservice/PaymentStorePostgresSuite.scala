@@ -4,7 +4,6 @@ import cats.effect.IO
 import cats.syntax.all._
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
-import io.circe.parser.decode
 import munit.CatsEffectSuite
 import org.testcontainers.utility.DockerImageName
 import org.typelevel.otel4s.metrics.Meter
@@ -143,10 +142,13 @@ class PaymentStorePostgresSuite
     * `store.create` call) is what actually isolates one test's rows from
     * another's, not a global "the table is empty" assertion.
     */
-  private def outboxRowsForPayment(
+  /** Rows in `outbox_events` whose `aggregate_id` equals `orderId` — the
+    * outbox's aggregate/correlation key for payment events.
+    */
+  private def outboxRowsForOrder(
       postgres: PostgreSQLContainer,
-      paymentId: String
-  ): List[(String, String, EventEnvelope)] = {
+      orderId: String
+  ): List[String] = {
     val conn = DriverManager.getConnection(
       postgres.jdbcUrl,
       postgres.username,
@@ -155,40 +157,18 @@ class PaymentStorePostgresSuite
     try {
       val rs = conn
         .createStatement()
-        .executeQuery(
-          "select aggregate_id, correlation_id, payload::text from outbox_events"
-        )
+        .executeQuery("select aggregate_id from outbox_events")
       Iterator
         .unfold(())(_ =>
-          if (rs.next())
-            Some(
-              (
-                (
-                  rs.getString("aggregate_id"),
-                  rs.getString("correlation_id"),
-                  rs.getString("payload")
-                ),
-                ()
-              )
-            )
-          else None
+          if (rs.next()) Some((rs.getString("aggregate_id"), ())) else None
         )
         .toList
-        .flatMap { case (aggregateId, correlationId, rawPayload) =>
-          decode[EventEnvelope](rawPayload).toOption
-            .flatMap(envelope =>
-              envelope.payload
-                .as[PaymentSettledEvent]
-                .toOption
-                .filter(_.paymentId == paymentId)
-                .as((aggregateId, correlationId, envelope))
-            )
-        }
+        .filter(_ == orderId)
     } finally conn.close()
   }
 
   test(
-    "update to Settled writes a matching outbox row, atomically with the status-change UPDATE"
+    "update to Settled writes no outbox row (no event until the authorize/capture producers land)"
   ) {
     withContainers { postgres =>
       val config = configFor(postgres)
@@ -203,23 +183,13 @@ class PaymentStorePostgresSuite
             updated <- store.update(created.id, PaymentStatus.Settled)
           } yield {
             assertEquals(updated.map(_.status), Some(PaymentStatus.Settled))
-            val rows = outboxRowsForPayment(postgres, created.id)
             assertEquals(
-              rows.size,
-              1,
-              s"expected exactly one outbox row, got: $rows"
+              outboxRowsForOrder(
+                postgres,
+                "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+              ),
+              Nil
             )
-            val (aggregateId, correlationId, envelope) = rows.head
-            assertEquals(aggregateId, "3fa85f64-5717-4562-b3fc-2c963f66afa6")
-            assertEquals(correlationId, "3fa85f64-5717-4562-b3fc-2c963f66afa6")
-            assertEquals(envelope.eventType, "PaymentSettled")
-            val settled = envelope.payload.as[PaymentSettledEvent].toOption
-            assertEquals(
-              settled.map(_.orderId),
-              Some("3fa85f64-5717-4562-b3fc-2c963f66afa6")
-            )
-            assertEquals(settled.map(_.paymentId), Some(created.id))
-            assertEquals(settled.map(_.amountCents), Some(4999))
           }
         }
     }
@@ -239,7 +209,13 @@ class PaymentStorePostgresSuite
               4999
             )
             _ <- store.update(created.id, PaymentStatus.Pending)
-          } yield assertEquals(outboxRowsForPayment(postgres, created.id), Nil)
+          } yield assertEquals(
+            outboxRowsForOrder(
+              postgres,
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            ),
+            Nil
+          )
         }
     }
   }
@@ -257,7 +233,10 @@ class PaymentStorePostgresSuite
             .update(unknownId, PaymentStatus.Settled)
             .map { result =>
               assertEquals(result, None)
-              assertEquals(outboxRowsForPayment(postgres, unknownId), Nil)
+              assertEquals(
+                outboxRowsForOrder(postgres, unknownId),
+                Nil
+              )
             }
         }
     }

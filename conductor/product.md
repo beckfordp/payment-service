@@ -56,24 +56,18 @@ item, not yet implemented.
 
 ## Events
 One topic per domain with a shared envelope (ADR 0009, migrated
-2026-10-11, `kafka-envelope_20261011`) — previously four per-event-type
-topics (`order.reserved`, `payment.settled`, `payment.failed`).
-- Consumes: `order-events`, filtered to `eventType = "OrderReserved"`
-  (other event types on the same topic, e.g. `OrderStatusChanged`, are
-  silently skipped, not logged as malformed) — `OrderReservedConsumer`
-  subscribes (group `payment-service-order-reserved`), creates a `Payment`
-  directly via `PaymentStore` (no HTTP round-trip), simulates a charge
-  (always succeeds — no real provider decided yet, see Out of scope),
-  publishes `PaymentSettled`. No retry on the consume side (decode/
-  null-value failures are logged and the offset still committed, matching
-  order-service's `StockEventConsumer`); no duplicate-delivery guard
-  (that's US-6.2).
-- Publishes: `payment-events` (eventType `PaymentSettled` /
-  `PaymentFailed`, payload pinned in `gluon/docs/system-design.md`) — via
-  `PaymentEventPublisher`, keyed and `correlationId`'d by `orderId`, each
-  publish wrapped in a hand-rolled cats-retry bounded retry
-  (`purerest.resilience` is `Client[F]`-only, doesn't apply to a Kafka
-  producer call) that logs loudly and drops on exhaustion.
+2026-10-11, `kafka-envelope_20261011`), plus the 2026-10-26 sync-payment-auth
+decision: authorization is a synchronous REST call from order-service, so this
+service consumes no Kafka topics today (the old `OrderReserved` consumer was
+retired by Rework 7).
+- Publishes: `payment-events` — four contracts pinned in
+  `gluon/docs/system-design.md`: `PaymentAuthorized` (authorize-success async
+  side effect, Journey 1), `PaymentCaptured` (capture on dispatch, Journey 4),
+  `PaymentAuthorizationExpired` (expiry sweep, Journey 5), and `PaymentFailed`
+  (capture-decline only, with `reason: capture_failed`; authorize-decline stays
+  synchronous and publishes nothing). All via the `outbox_events` table +
+  Debezium CDC, keyed and `correlationId`'d by `orderId`. The producers land
+  with those journeys — no code writes these rows yet.
 
 ## Out of scope for this service
 - Auth/identity (bare `customerId`/`orderId` for now — no user-service yet)

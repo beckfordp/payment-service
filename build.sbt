@@ -12,7 +12,6 @@ val flywayVersion = "11.8.2"
 val postgresqlJdbcVersion = "42.7.13"
 val pureconfigVersion = "0.17.10"
 val testcontainersScalaVersion = "0.43.6"
-val fs2KafkaVersion = "3.6.0"
 // purekafka: Kafka resilience/observability combinators + AsyncAPI docs
 // support (ADR 0010). Pinned to match order-service's/inventory-service's
 // own version (0.3.0 adds purekafka.docs.SchemaRegistryWriter, Rework 5
@@ -99,11 +98,9 @@ lazy val root = project
     libraryDependencies ++= Seq(
       "io.github.beckfordp" %% "purerestlib" % purerestlibVersion,
       "org.typelevel" %% "cats-effect" % catsEffectVersion,
-      // fs2-kafka: pure-FP, FS2-native Kafka consumer/producer (US-6.1) -
-      // subscribes to order.reserved, publishes payment.settled/payment.failed.
-      "com.github.fd4s" %% "fs2-kafka" % fs2KafkaVersion,
-      // purekafka: StreamSupervisor (restart-with-backoff) + DeadLetter
-      // (bounded-retry-then-DLQ) for OrderReservedConsumer (TD-2.4, ADR 0010).
+      // purekafka: AsyncAPI docs types (purekafka.docs) for this service's
+      // outbox/CDC publish contracts. No consumer/producer runtime usage -
+      // payment-service has no Kafka consumers until later checkout journeys.
       "io.github.beckfordp" %% "purekafka" % purekafkaVersion,
       "org.http4s" %% "http4s-ember-server" % http4sVersion,
       "org.http4s" %% "http4s-dsl" % http4sVersion,

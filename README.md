@@ -56,11 +56,13 @@ Swagger UI (generated from the same tapir endpoint definitions as the real route
 
 ## View Kafka AsyncAPI docs
 
-`OrderReservedConsumer` consumes `OrderReserved` on `order-events`, and this service publishes
-`PaymentSettled` on `payment-events` (via its outbox table + Debezium CDC, not a direct producer
-call). Both event types are registered for [AsyncAPI](https://www.asyncapi.com/) documentation via
-`purekafka.docs` (see `AsyncApiChannels`), the same way tapir generates the OpenAPI docs above.
-(`PaymentFailedEvent` isn't registered — it's defined but never actually published today.)
+This service registers its four `payment-events` publish contracts — `PaymentAuthorized`,
+`PaymentCaptured`, `PaymentAuthorizationExpired`, `PaymentFailed` — via its outbox table +
+Debezium CDC (not a direct producer call), for [AsyncAPI](https://www.asyncapi.com/)
+documentation via `purekafka.docs` (see `AsyncApiChannels`), the same way tapir generates the
+OpenAPI docs above. The producers land with Checkout Journeys 1/4/5; no code writes those outbox
+rows yet. Payment authorization is a synchronous REST call now, so this service has **no Kafka
+consumers** — the old `OrderReserved` consumer was retired (Rework 7).
 
 Generation is handled by the `sbt-purekafka-docs` plugin (`asyncApiChannelsClass` in `build.sbt`),
 auto-chained after `Compile / compile` — every `sbt compile`/`run`/`Docker/publishLocal` already

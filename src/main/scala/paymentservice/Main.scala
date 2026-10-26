@@ -33,12 +33,6 @@ object Main extends IOApp.Simple {
       )("payment-service starting")
     )
     store <- PaymentStore.postgres[IO](config.postgres, telemetry.meter)
-    _ <- KafkaConsumers.resource[IO](
-      config.kafka,
-      store,
-      telemetry.logger,
-      telemetry.meter
-    )
     routes = AppRoutes.all[IO](store, telemetry, AsyncApiChannels.channels)
     _ <- EmberServerBuilder
       .default[IO]

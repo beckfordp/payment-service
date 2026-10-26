@@ -4,11 +4,9 @@ import cats.effect.{Async, Ref, Resource, Sync}
 import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
-import io.circe.syntax._
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.Meter
 import skunk.{Codec, Session}
-import skunk.circe.codec.all.jsonb
 import skunk.codec.all._
 import skunk.implicits._
 
@@ -117,21 +115,6 @@ object PaymentStore {
       WHERE id = $uuid
       RETURNING order_id, amount_cents, status, created_at, updated_at
     """.query(text *: int4 *: paymentStatus *: timestamptz *: timestamptz)
-
-  /** Transactional outbox (ADR 0008 / TD-3.4): written atomically alongside
-    * `updatePayment` above whenever that update transitions a payment to
-    * `Settled`, instead of `OrderReservedConsumer` calling a Kafka producer
-    * separately afterward. `trace_parent` is left `NULL` — no mechanism exists
-    * yet in this codebase to extract a W3C traceparent for a Kafka publish
-    * (that's `purekafka`'s job, ADR 0010/Rework 3, sequenced after this track).
-    */
-  private val insertOutboxEvent: skunk.Command[
-    (UUID, String, io.circe.Json, String)
-  ] =
-    sql"""
-      INSERT INTO "outbox_events" (id, aggregate_id, payload, correlation_id)
-      VALUES ($uuid, $text, $jsonb, $text)
-    """.command
 
   private val deletePayment: skunk.Query[UUID, UUID] =
     sql"""
@@ -253,46 +236,9 @@ object PaymentStore {
                     for {
                       row <- timed("update") {
                         pool.use { session =>
-                          session.transaction.use { _ =>
-                            session
-                              .prepare(updatePayment)
-                              .flatMap(_.option((status, uuid)))
-                              .flatTap {
-                                case Some(
-                                      (orderId, amountCents, _, _, updatedAt)
-                                    ) if status == PaymentStatus.Settled =>
-                                  for {
-                                    outboxId <- Sync[F].delay(UUID.randomUUID())
-                                    eventId <- Sync[F].delay(UUID.randomUUID())
-                                    envelope = EventEnvelope(
-                                      eventId = eventId.toString,
-                                      eventType = "PaymentSettled",
-                                      timestamp = updatedAt.toInstant,
-                                      source = "payment-service",
-                                      correlationId = orderId,
-                                      payload = PaymentSettledEvent(
-                                        orderId = orderId,
-                                        paymentId = id,
-                                        amountCents = amountCents,
-                                        timestamp = updatedAt.toInstant
-                                      ).asJson
-                                    )
-                                    _ <- session
-                                      .prepare(insertOutboxEvent)
-                                      .flatMap(
-                                        _.execute(
-                                          (
-                                            outboxId,
-                                            orderId,
-                                            envelope.asJson,
-                                            orderId
-                                          )
-                                        )
-                                      )
-                                  } yield ()
-                                case _ => Sync[F].unit
-                              }
-                          }
+                          session
+                            .prepare(updatePayment)
+                            .flatMap(_.option((status, uuid)))
                         }
                       }
                     } yield row.map {

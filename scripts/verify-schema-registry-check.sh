@@ -6,12 +6,11 @@ set -euo pipefail
 # instance (gluon's infra/k8s/local-infra). Mirrors order-service's/
 # inventory-service's own equivalent scripts - exercises the real
 # production AsyncApiChannels registrations in AsyncApiChannels.scala,
-# registering both of this service's actual event schemas (OrderReserved,
-# PaymentSettled - PaymentFailedEvent is deliberately not registered, see
-# AsyncApiChannels.scala's own doc comment) under the real
-# "payment-service" group.
+# registering all four of this service's payment-events contracts
+# (PaymentAuthorized, PaymentCaptured, PaymentAuthorizationExpired,
+# PaymentFailed) under the shared "gluon" group.
 #
-# Proves: a run registers both channels and sets a BACKWARD compatibility
+# Proves: a run registers all four channels and sets a BACKWARD compatibility
 # rule on each (first time only); a second identical run is a no-op (no
 # error).
 #
@@ -29,7 +28,7 @@ export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
 
 FAILED=0
 
-echo "1. First run (registers both channels + sets the BACKWARD rule)..."
+echo "1. First run (registers all four channels + sets the BACKWARD rule)..."
 if sbt --error schemaRegistryCheck; then
   echo "   OK: first run succeeded"
 else
@@ -38,10 +37,14 @@ else
 fi
 
 echo
-echo "2. Checking the registry directly for both registered artifacts..."
-ARTIFACTS_URL="http://apicurio-registry.gluon-local.svc.cluster.local:8080/apis/registry/v3/groups/payment-service/artifacts"
+echo "2. Checking the registry directly for all four registered artifacts..."
+ARTIFACTS_URL="http://apicurio-registry.gluon-local.svc.cluster.local:8080/apis/registry/v3/groups/gluon/artifacts"
 RESPONSE="$(curl -s "$ARTIFACTS_URL")"
-for needle in "order-events-OrderReserved" "payment-events-PaymentSettled"; do
+for needle in \
+  "payment-events-PaymentAuthorized" \
+  "payment-events-PaymentCaptured" \
+  "payment-events-PaymentAuthorizationExpired" \
+  "payment-events-PaymentFailed"; do
   if ! echo "$RESPONSE" | grep -q "$needle"; then
     echo "FAIL: registry missing expected artifact: ${needle}" >&2
     FAILED=1

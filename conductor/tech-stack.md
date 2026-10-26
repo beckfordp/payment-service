@@ -15,16 +15,15 @@
   `cors_20261010` track (TD-1.3).
 
 ## Messaging
-- fs2-kafka 3.6.0 — `order.reserved` consumer + `payment.settled`/
-  `payment.failed` producer, matching inventory-service's (US-5.1) and
-  order-service's (US-5.2) choice. Plain `String` key/value, hand-rolled
-  circe JSON (no circe-kafka serializer layer) — same convention already
-  established cross-repo.
-- purekafka (`io.github.beckfordp`) — `consumer.StreamSupervisor` wraps
-  `OrderReservedConsumer`'s stream (restart-with-backoff) and
-  `consumer.DeadLetter` wraps its per-message processing (bounded retry,
-  then routes to `order-events-dlq` on exhaustion) — TD-2.4, ADR 0010.
-  Wired together in `KafkaConsumers.supervised`.
+- No Kafka consumer/producer runtime in this service today: payment
+  authorization is a synchronous REST call (2026-10-26 decision), and the four
+  `payment-events` contracts are published through the `outbox_events` table +
+  Debezium CDC once Checkout Journeys 1/4/5 add their producers. The old
+  `OrderReservedConsumer`/`KafkaConsumers`/fs2-kafka wiring was retired by
+  Rework 7.
+- purekafka (`io.github.beckfordp`) — supplies the `purekafka.docs` AsyncAPI
+  types (`AsyncApiChannel`, `PublisherKind.Cdc`); no supervision/DLQ usage
+  until a consumer returns.
 
 ## API layer
 - tapir 1.11.25 — route definitions and generated Swagger/OpenAPI docs
