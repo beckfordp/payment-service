@@ -17,8 +17,8 @@
 ## Phase 3: Authorize (US-14.1)
 - [x] Task: Outbox writer + authorize persistence — failing `PaymentStoreSuite`/`PaymentStorePostgresSuite` (`authorize` writes Authorized payment w/ method/authId/expiresAt + `PaymentAuthorized` envelope outbox row in one tx; `decline` writes Failed payment w/ reason, no outbox row; rollback leaves neither) (Red); `V6__add_authorization_columns.sql`, `PendingOutboxEvent` mirroring order-service, `inMemoryWithOutbox` (Green) — deviation: explicit `recordAuthorization`/`recordDecline` store methods instead of a generic `PendingOutboxEvent` (only one producer, all fields known up front; generalise when Journey 4/5 add more) `7b9ad80`
 - [x] Task: `POST /payments/authorize` — failing route tests (200 `{authId,expiresAt}`, 402 `{error,reason}`, 404 unknown method, 400 non-positive amount/blank orderId) (Red); endpoint orchestrating method lookup → gateway → store, wired in `Main` (Green) `920f139`
-- [ ] Task: CORS allowed methods check/update; `CorsSuite` green
-- [ ] Task: Full `sbt test` + coverage
+- [x] Task: CORS allowed methods check/update; `CorsSuite` green — no change needed: POST already allowed; `/payments/methods` preflight proven live in Phase 2; `/payments/authorize` is server-to-server
+- [x] Task: Full `sbt test` + coverage — 133/133; AuthorizeRoutes 93%/80%, PaymentStore ~100% (overall 91.87%/94.00%)
 - [ ] Task: `scripts/verify-checkout-authorize.sh` — real Postgres + `sbt run`: create method (4242… approve), authorize → 200 + outbox row; create method ending 0002 visa (decline token) → 402, no new outbox row; unknown method → 404; trap cleanup. Run for real
 - [ ] Task: Conductor - User Manual Verification 'Authorize' (Protocol in workflow.md)
 
