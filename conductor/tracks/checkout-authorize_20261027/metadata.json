@@ -1,0 +1,8 @@
+{
+  "track_id": "checkout-authorize_20261027",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-10-27T12:20:56Z",
+  "updated_at": "2026-10-27T12:20:56Z",
+  "description": "Checkout Journey 1 payment-service — gateway algebra, Authorized status, payment methods + billing address, POST /payments/authorize (US-12.1, US-13.1, US-13.2, US-14.1, ADR 0011)"
+}
