@@ -28,3 +28,6 @@
 - [x] Task: Update `product.md` (domain model, US-12.1/13.1/13.2/14.1 done), `tech-stack.md` (gateway config, outbox writer), README endpoints
 
 Note: decline test card = Luhn-valid visa ending 0002 (e.g. 4000 0000 0000 0002) → `tok_visa_0002`.
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions `c89cff3`
