@@ -10,7 +10,7 @@
 
 ## Phase 2: Payment methods (US-13.1, US-13.2)
 - [x] Task: `PaymentMethodStore[F]` — failing `PaymentMethodStoreSuite` (inMemory create/get) + `PaymentMethodStorePostgresSuite` (round-trip, billing JSONB, schema has no PAN column) (Red); `V5__create_payment_methods.sql`, `inMemory`/`postgres` with `timed` telemetry (Green) `a1315b9`
-- [ ] Task: `POST /payments/methods` — failing route tests (201 body `{id,last4,brand,expiry}`, no token in body, 400 per invalid card/expiry/address/blank customerId) (Red); tapir endpoint in `PaymentRoutes`, wire store in `Main`/`AppRoutes`, docs suite updated (Green)
+- [x] Task: `POST /payments/methods` — failing route tests (201 body `{id,last4,brand,expiry}`, no token in body, 400 per invalid card/expiry/address/blank customerId) (Red); tapir endpoint in new `PaymentMethodRoutes` (deviation: own object, not `PaymentRoutes` — keeps generated CRUD file untouched), wire store in `Main`/`AppRoutes`, docs suite updated (Green) `f682964`
 - [ ] Task: Full `sbt test` + coverage
 - [ ] Task: Conductor - User Manual Verification 'Payment methods' (Protocol in workflow.md)
 
