@@ -8,7 +8,7 @@
 - [x] Task: Full `sbt test` + coverage >80% new code — 103/103; new files ~100% stmt/branch (overall 89.62%/96.25%)
 - [x] Task: Conductor - User Manual Verification 'Domain foundations' (Protocol in workflow.md) — `/prompt off`: ran `scripts/verify-domain-foundations.sh` live (boot w/ gateway config, V4 applied, PATCH→authorized stored) — all passed `c1815a0`
 
-## Phase 2: Payment methods (US-13.1, US-13.2)
+## Phase 2: Payment methods (US-13.1, US-13.2) [checkpoint: f364958]
 - [x] Task: `PaymentMethodStore[F]` — failing `PaymentMethodStoreSuite` (inMemory create/get) + `PaymentMethodStorePostgresSuite` (round-trip, billing JSONB, schema has no PAN column) (Red); `V5__create_payment_methods.sql`, `inMemory`/`postgres` with `timed` telemetry (Green) `a1315b9`
 - [x] Task: `POST /payments/methods` — failing route tests (201 body `{id,last4,brand,expiry}`, no token in body, 400 per invalid card/expiry/address/blank customerId) (Red); tapir endpoint in new `PaymentMethodRoutes` (deviation: own object, not `PaymentRoutes` — keeps generated CRUD file untouched), wire store in `Main`/`AppRoutes`, docs suite updated (Green) `f682964`
 - [x] Task: Full `sbt test` + coverage — 120/120; new files 96–100% stmt (overall 90.93%/95.51%)
