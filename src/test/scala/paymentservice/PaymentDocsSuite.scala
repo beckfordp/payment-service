@@ -34,4 +34,22 @@ class PaymentDocsSuite extends CatsEffectSuite {
       assert(clue(docsBody).contains("/payments"))
     }
   }
+
+  test("POST /payments/methods is documented via purerest.docs") {
+    for {
+      methods <- PaymentMethodStore.inMemory[IO]
+      routes = Docs.routes[IO](
+        "Payment Service",
+        "1.0",
+        List(
+          PaymentMethodRoutes
+            .createMethodServerEndpoint[IO](methods, NoOpLogger[IO])
+        )
+      )
+      docsResponse <- routes.orNotFound.run(
+        Request[IO](Method.GET, uri"/docs/docs.yaml")
+      )
+      docsBody <- docsResponse.bodyText.compile.string
+    } yield assert(clue(docsBody).contains("/payments/methods"))
+  }
 }

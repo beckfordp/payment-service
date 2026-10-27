@@ -33,7 +33,13 @@ object Main extends IOApp.Simple {
       )("payment-service starting")
     )
     store <- PaymentStore.postgres[IO](config.postgres, telemetry.meter)
-    routes = AppRoutes.all[IO](store, telemetry, AsyncApiChannels.channels)
+    methods <- PaymentMethodStore.postgres[IO](config.postgres, telemetry.meter)
+    routes = AppRoutes.all[IO](
+      store,
+      methods,
+      telemetry,
+      AsyncApiChannels.channels
+    )
     _ <- EmberServerBuilder
       .default[IO]
       .withHost(host"0.0.0.0")
