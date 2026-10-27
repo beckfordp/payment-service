@@ -1,0 +1,1 @@
+Task: Address + validation (US-12.1). Address case class (line2 optional), circe/tapir codecs, validate (required line1/city/postalCode, alpha-2 country). Files: Address.scala, AddressSuite.scala.
