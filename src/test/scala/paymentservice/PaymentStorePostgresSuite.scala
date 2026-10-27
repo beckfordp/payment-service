@@ -37,7 +37,7 @@ class PaymentStorePostgresSuite
       Migrations.run[IO](config) *> PaymentStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
-          store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999).map {
+          store.create("order-create", 4999).map {
             entity =>
               assert(entity.id.nonEmpty)
           }
@@ -53,8 +53,8 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            first <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-            second <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+            first <- store.create("order-1", 4999)
+            second <- store.create("order-2", 4999)
           } yield assertNotEquals(first.id, second.id)
         }
     }
@@ -68,7 +68,7 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             created <- store.create(
-              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "order-get",
               4999
             )
             found <- store.get(created.id)
@@ -109,7 +109,7 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             created <- store.create(
-              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "order-update",
               4999
             )
             updated <- store.update(created.id, PaymentStatus.Pending)
@@ -178,7 +178,7 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             created <- store.create(
-              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "order-captured-outbox",
               4999
             )
             updated <- store.update(created.id, PaymentStatus.Captured)
@@ -187,7 +187,7 @@ class PaymentStorePostgresSuite
             assertEquals(
               outboxRowsForOrder(
                 postgres,
-                "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                "order-captured-outbox"
               ),
               Nil
             )
@@ -206,14 +206,14 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             created <- store.create(
-              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "order-pending-outbox",
               4999
             )
             _ <- store.update(created.id, PaymentStatus.Pending)
           } yield assertEquals(
             outboxRowsForOrder(
               postgres,
-              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+              "order-pending-outbox"
             ),
             Nil
           )
@@ -266,7 +266,7 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             created <- store.create(
-              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "order-delete",
               4999
             )
             deleted <- store.delete(created.id)
@@ -336,7 +336,7 @@ class PaymentStorePostgresSuite
           .use { store =>
             for {
               created <- store.create(
-                "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "order-metrics",
                 4999
               )
               _ <- store.get(created.id)
@@ -381,7 +381,7 @@ class PaymentStorePostgresSuite
           .use { store =>
             for {
               result <- store
-                .create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+                .create("order-unreachable", 4999)
                 .attempt
               metrics <- testMeter.collectMetrics
             } yield {
@@ -425,7 +425,7 @@ class PaymentStorePostgresSuite
           for {
             ready <- store.ping
             created <- store.create(
-              "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "order-crud",
               4999
             )
             read1 <- store.get(created.id)
@@ -438,7 +438,7 @@ class PaymentStorePostgresSuite
             assertEquals(read1, Some(created))
             assertEquals(
               updated.map(_.orderId),
-              Some("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+              Some("order-crud")
             )
             assertEquals(updated.map(_.amountCents), Some(4999))
             assertEquals(updated.map(_.status), Some(PaymentStatus.Pending))
@@ -495,12 +495,14 @@ class PaymentStorePostgresSuite
       val orderId = java.util.UUID.randomUUID().toString
       withStores(postgres) { (store, method) =>
         for {
-          payment <- store.recordAuthorization(
-            orderId,
-            4999,
-            method.id,
-            authorization
-          )
+          payment <- store
+            .recordAuthorization(
+              orderId,
+              4999,
+              method.id,
+              authorization
+            )
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
           found <- store.get(payment.id)
         } yield {
           assertEquals(payment.status, PaymentStatus.Authorized)
@@ -527,12 +529,14 @@ class PaymentStorePostgresSuite
       val orderId = java.util.UUID.randomUUID().toString
       withStores(postgres) { (store, method) =>
         for {
-          payment <- store.recordDecline(
-            orderId,
-            4999,
-            method.id,
-            DeclineReason("insufficient_funds")
-          )
+          payment <- store
+            .recordDecline(
+              orderId,
+              4999,
+              method.id,
+              DeclineReason("insufficient_funds")
+            )
+            .map(_.getOrElse(fail("expected the decline to be inserted")))
           found <- store.get(payment.id)
         } yield {
           assertEquals(payment.status, PaymentStatus.Failed)
@@ -595,6 +599,64 @@ class PaymentStorePostgresSuite
               s"select id from payment where order_id = '$orderId'"
             ),
             Nil
+          )
+        }
+      }
+    }
+  }
+
+  test("findByOrderId returns the stored row and None for an unknown order") {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
+          found <- store.findByOrderId(orderId)
+          missing <- store.findByOrderId("order-unknown")
+        } yield {
+          assertEquals(found.map(_.orderId), Some(orderId))
+          assertEquals(found.map(_.status), Some(PaymentStatus.Authorized))
+          assertEquals(missing, None)
+        }
+      }
+    }
+  }
+
+  test(
+    "a repeated recordAuthorization for the same order returns None, one row and one outbox event"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          first <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .map(_.getOrElse(fail("expected the first insert")))
+          second <- store.recordAuthorization(
+            orderId,
+            4999,
+            method.id,
+            authorization
+          )
+          found <- store.findByOrderId(orderId)
+        } yield {
+          assertEquals(second, None)
+          assertEquals(found.map(_.id), Some(first.id))
+          assertEquals(
+            query(
+              postgres,
+              s"select id from payment where order_id = '$orderId'"
+            ).size,
+            1
+          )
+          assertEquals(
+            query(
+              postgres,
+              s"select id from outbox_events where aggregate_id = '$orderId'"
+            ).size,
+            1
           )
         }
       }

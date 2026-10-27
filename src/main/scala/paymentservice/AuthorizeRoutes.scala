@@ -43,6 +43,8 @@ object AuthorizeError {
   final case class Invalid(error: String) extends AuthorizeError
   case object MethodNotFound extends AuthorizeError
   final case class Declined(reason: String) extends AuthorizeError
+  final case class AlreadyProcessed(error: String) extends AuthorizeError
+  final case class Internal(error: String) extends AuthorizeError
 }
 
 /** order-service-facing synchronous `POST /payments/authorize` (US-14.1) -
@@ -82,6 +84,26 @@ object AuthorizeRoutes {
         )
     )
 
+  private val alreadyProcessedVariant
+      : EndpointOutput.OneOfVariant[AuthorizeError.AlreadyProcessed] =
+    oneOfVariant(
+      statusCode(StatusCode.Conflict)
+        .and(jsonBody[ErrorResponse])
+        .map[AuthorizeError.AlreadyProcessed](e =>
+          AuthorizeError.AlreadyProcessed(e.error)
+        )(e => ErrorResponse(e.error))
+    )
+
+  private val internalVariant
+      : EndpointOutput.OneOfVariant[AuthorizeError.Internal] =
+    oneOfVariant(
+      statusCode(StatusCode.InternalServerError)
+        .and(jsonBody[ErrorResponse])
+        .map[AuthorizeError.Internal](e => AuthorizeError.Internal(e.error))(
+          e => ErrorResponse(e.error)
+        )
+    )
+
   private val authorizeEndpoint: PublicEndpoint[
     AuthorizePaymentRequest,
     AuthorizeError,
@@ -93,7 +115,13 @@ object AuthorizeRoutes {
       .in(jsonBody[AuthorizePaymentRequest])
       .out(jsonBody[AuthorizePaymentResponse])
       .errorOut(
-        oneOf[AuthorizeError](invalidVariant, notFoundVariant, declinedVariant)
+        oneOf[AuthorizeError](
+          invalidVariant,
+          notFoundVariant,
+          declinedVariant,
+          alreadyProcessedVariant,
+          internalVariant
+        )
       )
 
   private def validate(req: AuthorizePaymentRequest): Either[String, Unit] =
@@ -113,53 +141,150 @@ object AuthorizeRoutes {
         "order_id" -> req.orderId,
         "payment_method_id" -> req.paymentMethodId
       )
+
+      /** A stored outcome for this order is replayed instead of placing a
+        * second hold (TD-10.1). Different amount or method is always a `409`; a
+        * replayed decline is a `402` with the original reason.
+        */
+      def replay(
+          existing: Payment
+      ): Either[AuthorizeError, AuthorizePaymentResponse] =
+        if (
+          existing.amountCents != req.amountCents ||
+          !existing.paymentMethodId.contains(req.paymentMethodId)
+        )
+          Left(
+            AuthorizeError.AlreadyProcessed(
+              "Order already has a payment with a different amount or payment method"
+            )
+          )
+        else
+          existing.status match {
+            case PaymentStatus.Authorized =>
+              (existing.authId, existing.expiresAt) match {
+                case (Some(authId), Some(expiresAt)) =>
+                  Right(AuthorizePaymentResponse(authId, expiresAt))
+                case _ =>
+                  Left(
+                    AuthorizeError.Internal(
+                      "Stored authorization is incomplete"
+                    )
+                  )
+              }
+            case PaymentStatus.Failed =>
+              existing.declineReason match {
+                case Some(reason) => Left(AuthorizeError.Declined(reason))
+                case None         =>
+                  Left(
+                    AuthorizeError.Internal("Stored decline has no reason")
+                  )
+              }
+            case other =>
+              Left(
+                AuthorizeError.AlreadyProcessed(
+                  s"Order already has a payment in status ${other.asString}"
+                )
+              )
+          }
+
+      def replayExisting(
+          existing: Payment
+      ): F[Either[AuthorizeError, AuthorizePaymentResponse]] =
+        logger
+          .info(context + ("payment_id" -> existing.id))(
+            "Replaying the stored payment outcome"
+          )
+          .as(replay(existing))
+
+      /** A concurrent call inserted the row first: release this call's fresh
+        * hold (best-effort; the sweep covers a failed void) and replay the
+        * winner.
+        */
+      def replayAfterConflict(
+          voidedAuthId: Option[String]
+      ): F[Either[AuthorizeError, AuthorizePaymentResponse]] = {
+        val release = voidedAuthId match {
+          case None         => Async[F].unit
+          case Some(authId) =>
+            gateway.void(authId).handleErrorWith { error =>
+              logger.warn(context + ("auth_id" -> authId), error)(
+                "Releasing the losing authorization failed"
+              )
+            }
+        }
+        release *> payments.findByOrderId(req.orderId).flatMap {
+          case Some(existing) => replayExisting(existing)
+          case None           =>
+            logger
+              .error(context)(
+                "Payment row disappeared after an insert conflict"
+              )
+              .as(
+                Left(
+                  AuthorizeError.Internal(
+                    "Payment could not be recorded or read back"
+                  )
+                )
+              )
+        }
+      }
+
       def authorizeWith(
           method: PaymentMethod
       ): F[Either[AuthorizeError, AuthorizePaymentResponse]] =
-        gateway.authorize(method.cardToken, req.amountCents).flatMap {
-          case Right(authorization) =>
-            payments
-              .recordAuthorization(
-                req.orderId,
-                req.amountCents,
-                method.id,
-                authorization
-              )
-              // Don't leave an unrecorded hold at the gateway if persisting
-              // the authorization fails - release it before the 500.
-              .onError { case _ => gateway.void(authorization.authId) }
-              .flatMap { payment =>
-                logger
-                  .info(context + ("payment_id" -> payment.id))(
-                    "Payment authorized"
+        payments.findByOrderId(req.orderId).flatMap {
+          case Some(existing) => replayExisting(existing)
+          case None           =>
+            gateway.authorize(method.cardToken, req.amountCents).flatMap {
+              case Right(authorization) =>
+                payments
+                  .recordAuthorization(
+                    req.orderId,
+                    req.amountCents,
+                    method.id,
+                    authorization
                   )
-                  .as(
-                    Right(
-                      AuthorizePaymentResponse(
-                        authorization.authId,
-                        authorization.expiresAt
-                      )
-                    )
+                  // Don't leave an unrecorded hold at the gateway if persisting
+                  // the authorization fails - release it before the 500.
+                  .onError { case _ => gateway.void(authorization.authId) }
+                  .flatMap {
+                    case Some(payment) =>
+                      logger
+                        .info(context + ("payment_id" -> payment.id))(
+                          "Payment authorized"
+                        )
+                        .as(
+                          Right(
+                            AuthorizePaymentResponse(
+                              authorization.authId,
+                              authorization.expiresAt
+                            )
+                          )
+                        )
+                    case None =>
+                      replayAfterConflict(Some(authorization.authId))
+                  }
+              case Left(decline) =>
+                payments
+                  .recordDecline(
+                    req.orderId,
+                    req.amountCents,
+                    method.id,
+                    decline
                   )
-              }
-          case Left(decline) =>
-            payments
-              .recordDecline(
-                req.orderId,
-                req.amountCents,
-                method.id,
-                decline
-              )
-              .flatMap { payment =>
-                logger
-                  .warn(
-                    context ++ Map(
-                      "payment_id" -> payment.id,
-                      "reason" -> decline.value
-                    )
-                  )("Payment declined")
-                  .as(Left(AuthorizeError.Declined(decline.value)))
-              }
+                  .flatMap {
+                    case Some(payment) =>
+                      logger
+                        .warn(
+                          context ++ Map(
+                            "payment_id" -> payment.id,
+                            "reason" -> decline.value
+                          )
+                        )("Payment declined")
+                        .as(Left(AuthorizeError.Declined(decline.value)))
+                    case None => replayAfterConflict(None)
+                  }
+            }
         }
 
       for {

@@ -89,12 +89,14 @@ class PaymentStoreSuite extends CatsEffectSuite {
   ) {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
-      payment <- store.recordAuthorization(
-        "order-1",
-        4999,
-        "pm-1",
-        authorization
-      )
+      payment <- store
+        .recordAuthorization(
+          "order-1",
+          4999,
+          "pm-1",
+          authorization
+        )
+        .map(_.getOrElse(fail("expected the authorization to be inserted")))
       found <- store.get(payment.id)
       events <- outbox.get
     } yield {
@@ -122,12 +124,14 @@ class PaymentStoreSuite extends CatsEffectSuite {
   ) {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
-      payment <- store.recordDecline(
-        "order-1",
-        4999,
-        "pm-1",
-        DeclineReason("insufficient_funds")
-      )
+      payment <- store
+        .recordDecline(
+          "order-1",
+          4999,
+          "pm-1",
+          DeclineReason("insufficient_funds")
+        )
+        .map(_.getOrElse(fail("expected the decline to be inserted")))
       found <- store.get(payment.id)
       events <- outbox.get
     } yield {
@@ -136,6 +140,63 @@ class PaymentStoreSuite extends CatsEffectSuite {
       assertEquals(payment.declineReason, Some("insufficient_funds"))
       assertEquals(payment.authId, None)
       assertEquals(found, Some(payment))
+      assertEquals(events, Nil)
+    }
+  }
+
+  test("findByOrderId returns the stored row and None for an unknown order") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      _ <- store
+        .recordAuthorization("order-1", 4999, "pm-1", authorization)
+        .map(_.getOrElse(fail("expected the authorization to be inserted")))
+      found <- store.findByOrderId("order-1")
+      missing <- store.findByOrderId("order-unknown")
+    } yield {
+      assertEquals(found.map(_.orderId), Some("order-1"))
+      assertEquals(found.map(_.status), Some(PaymentStatus.Authorized))
+      assertEquals(missing, None)
+    }
+  }
+
+  test(
+    "a second recordAuthorization for the same order returns None and adds no outbox row"
+  ) {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      first <- store
+        .recordAuthorization("order-1", 4999, "pm-1", authorization)
+        .map(_.getOrElse(fail("expected the first insert")))
+      second <- store.recordAuthorization(
+        "order-1",
+        4999,
+        "pm-1",
+        authorization
+      )
+      events <- outbox.get
+      found <- store.findByOrderId("order-1")
+    } yield {
+      assertEquals(second, None)
+      assertEquals(found.map(_.id), Some(first.id))
+      assertEquals(events.size, 1)
+    }
+  }
+
+  test("a second recordDecline for the same order returns None") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- store
+        .recordDecline("order-1", 4999, "pm-1", DeclineReason("declined"))
+        .map(_.getOrElse(fail("expected the first decline")))
+      second <- store.recordDecline(
+        "order-1",
+        4999,
+        "pm-1",
+        DeclineReason("declined")
+      )
+      events <- outbox.get
+    } yield {
+      assertEquals(second, None)
       assertEquals(events, Nil)
     }
   }

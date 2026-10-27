@@ -38,25 +38,34 @@ trait PaymentStore[F[_]] {
   def delete(id: String): F[Boolean]
   def ping: F[Boolean]
 
+  /** The single payment row for an order (TD-10.1) — used by
+    * `POST /payments/authorize` to replay a prior outcome instead of placing a
+    * second hold.
+    */
+  def findByOrderId(orderId: String): F[Option[Payment]]
+
   /** Persists an `Authorized` payment and its `payment-events:
-    * PaymentAuthorized` outbox row in one transaction (ADR 0008/0011).
+    * PaymentAuthorized` outbox row in one transaction (ADR 0008/0011). `None`
+    * when the order already has a payment (unique conflict): nothing is written
+    * and no outbox row is emitted.
     */
   def recordAuthorization(
       orderId: String,
       amountCents: Int,
       paymentMethodId: String,
       authorization: Authorization
-  ): F[Payment]
+  ): F[Option[Payment]]
 
   /** Persists a `Failed` payment with its decline reason. A decline stays
-    * synchronous - no outbox row, nothing published.
+    * synchronous - no outbox row, nothing published. `None` on a unique
+    * conflict, same as `recordAuthorization`.
     */
   def recordDecline(
       orderId: String,
       amountCents: Int,
       paymentMethodId: String,
       reason: DeclineReason
-  ): F[Payment]
+  ): F[Option[Payment]]
 }
 
 object PaymentStore {
@@ -155,42 +164,53 @@ object PaymentStore {
 
         def ping: F[Boolean] = Sync[F].pure(true)
 
+        def findByOrderId(orderId: String): F[Option[Payment]] =
+          ref.get.map(_.values.find(_.orderId == orderId))
+
         def recordAuthorization(
             orderId: String,
             amountCents: Int,
             paymentMethodId: String,
             authorization: Authorization
-        ): F[Payment] =
-          for {
-            envelope <- authorizedEnvelope[F](orderId, authorization)
-            payment <- insert(
-              orderId,
-              amountCents,
-              PaymentStatus.Authorized,
-              _.copy(
-                paymentMethodId = Some(paymentMethodId),
-                authId = Some(authorization.authId),
-                expiresAt = Some(authorization.expiresAt)
-              )
-            )
-            _ <- outboxRef.update(_ :+ (orderId -> envelope))
-          } yield payment
+        ): F[Option[Payment]] =
+          findByOrderId(orderId).flatMap {
+            case Some(_) => Sync[F].pure(None)
+            case None    =>
+              for {
+                envelope <- authorizedEnvelope[F](orderId, authorization)
+                payment <- insert(
+                  orderId,
+                  amountCents,
+                  PaymentStatus.Authorized,
+                  _.copy(
+                    paymentMethodId = Some(paymentMethodId),
+                    authId = Some(authorization.authId),
+                    expiresAt = Some(authorization.expiresAt)
+                  )
+                )
+                _ <- outboxRef.update(_ :+ (orderId -> envelope))
+              } yield Some(payment)
+          }
 
         def recordDecline(
             orderId: String,
             amountCents: Int,
             paymentMethodId: String,
             reason: DeclineReason
-        ): F[Payment] =
-          insert(
-            orderId,
-            amountCents,
-            PaymentStatus.Failed,
-            _.copy(
-              paymentMethodId = Some(paymentMethodId),
-              declineReason = Some(reason.value)
-            )
-          )
+        ): F[Option[Payment]] =
+          findByOrderId(orderId).flatMap {
+            case Some(_) => Sync[F].pure(None)
+            case None    =>
+              insert(
+                orderId,
+                amountCents,
+                PaymentStatus.Failed,
+                _.copy(
+                  paymentMethodId = Some(paymentMethodId),
+                  declineReason = Some(reason.value)
+                )
+              ).map(Some(_))
+          }
       }
       (store, outboxRef)
     }
@@ -266,6 +286,7 @@ object PaymentStore {
          expires_at, decline_reason)
       VALUES ($uuid, $text, $int4, $paymentStatus, $uuid, ${text.opt},
               ${timestamptz.opt}, ${text.opt})
+      ON CONFLICT (order_id) DO NOTHING
       RETURNING order_id, amount_cents, status, created_at, updated_at,
                 payment_method_id, auth_id, expires_at, decline_reason
     """.query(paymentRow)
@@ -277,6 +298,46 @@ object PaymentStore {
       FROM "payment"
       WHERE id = $uuid
     """.query(paymentRow)
+
+  private val selectPaymentByOrderId: skunk.Query[String, (UUID, PaymentRow)] =
+    sql"""
+      SELECT id, order_id, amount_cents, status, created_at, updated_at,
+             payment_method_id, auth_id, expires_at, decline_reason
+      FROM "payment"
+      WHERE order_id = $text
+    """
+      .query(
+        uuid *: text *: int4 *: paymentStatus *: timestamptz *: timestamptz *:
+          uuid.opt *: text.opt *: timestamptz.opt *: text.opt
+      )
+      .map {
+        case (
+              id,
+              orderId,
+              amountCents,
+              status,
+              createdAt,
+              updatedAt,
+              paymentMethodId,
+              authId,
+              expiresAt,
+              declineReason
+            ) =>
+          (
+            id,
+            (
+              orderId,
+              amountCents,
+              status,
+              createdAt,
+              updatedAt,
+              paymentMethodId,
+              authId,
+              expiresAt,
+              declineReason
+            )
+          )
+      }
 
   private val updatePayment: skunk.Query[(PaymentStatus, UUID), PaymentRow] =
     sql"""
@@ -335,53 +396,57 @@ object PaymentStore {
                 expiresAt: Option[Instant],
                 declineReason: Option[String],
                 outbox: Option[EventEnvelope]
-            ): F[Payment] =
+            ): F[Option[Payment]] =
               for {
                 id <- Sync[F].delay(UUID.randomUUID())
                 methodId <- Sync[F].delay(UUID.fromString(paymentMethodId))
                 row <- timed("insert") {
                   pool.use { session =>
                     session.transaction.use { _ =>
-                      for {
-                        row <- session
-                          .prepare(insertAuthorizeOutcome)
-                          .flatMap(
-                            _.unique(
-                              (
-                                id,
-                                orderId,
-                                amountCents,
-                                status,
-                                methodId,
-                                authId,
-                                expiresAt.map(_.atOffset(ZoneOffset.UTC)),
-                                declineReason
-                              )
+                      session
+                        .prepare(insertAuthorizeOutcome)
+                        .flatMap(
+                          _.option(
+                            (
+                              id,
+                              orderId,
+                              amountCents,
+                              status,
+                              methodId,
+                              authId,
+                              expiresAt.map(_.atOffset(ZoneOffset.UTC)),
+                              declineReason
                             )
                           )
-                        _ <- outbox.traverse_ { envelope =>
-                          Sync[F]
-                            .delay(UUID.randomUUID())
-                            .flatMap { outboxId =>
-                              session
-                                .prepare(insertOutboxEvent)
-                                .flatMap(
-                                  _.execute(
-                                    (
-                                      outboxId,
-                                      orderId,
-                                      envelope,
-                                      envelope.correlationId
-                                    )
-                                  )
-                                )
-                            }
+                        )
+                        .flatMap {
+                          case None           => Sync[F].pure(None)
+                          case Some(inserted) =>
+                            outbox
+                              .traverse_ { envelope =>
+                                Sync[F]
+                                  .delay(UUID.randomUUID())
+                                  .flatMap { outboxId =>
+                                    session
+                                      .prepare(insertOutboxEvent)
+                                      .flatMap(
+                                        _.execute(
+                                          (
+                                            outboxId,
+                                            orderId,
+                                            envelope,
+                                            envelope.correlationId
+                                          )
+                                        )
+                                      )
+                                  }
+                              }
+                              .as(Some(inserted))
                         }
-                      } yield row
                     }
                   }
                 }
-              } yield toPayment(id.toString, row)
+              } yield row.map(toPayment(id.toString, _))
 
             new PaymentStore[F] {
               def create(orderId: String, amountCents: Int): F[Payment] =
@@ -454,12 +519,21 @@ object PaymentStore {
                   pool.use(_.unique(pingQuery))
                 }.attempt.map(_.isRight)
 
+              def findByOrderId(orderId: String): F[Option[Payment]] =
+                timed("select") {
+                  pool.use { session =>
+                    session
+                      .prepare(selectPaymentByOrderId)
+                      .flatMap(_.option(orderId))
+                  }
+                }.map(_.map { case (id, row) => toPayment(id.toString, row) })
+
               def recordAuthorization(
                   orderId: String,
                   amountCents: Int,
                   paymentMethodId: String,
                   authorization: Authorization
-              ): F[Payment] =
+              ): F[Option[Payment]] =
                 authorizedEnvelope[F](orderId, authorization).flatMap {
                   envelope =>
                     insertOutcome(
@@ -479,7 +553,7 @@ object PaymentStore {
                   amountCents: Int,
                   paymentMethodId: String,
                   reason: DeclineReason
-              ): F[Payment] =
+              ): F[Option[Payment]] =
                 insertOutcome(
                   orderId,
                   amountCents,

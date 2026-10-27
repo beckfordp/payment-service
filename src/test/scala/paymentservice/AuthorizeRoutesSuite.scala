@@ -121,6 +121,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def update(id: String, s: PaymentStatus) = payments.update(id, s)
         def delete(id: String) = payments.delete(id)
         def ping = payments.ping
+        def findByOrderId(o: String) = payments.findByOrderId(o)
         def recordAuthorization(
             o: String,
             a: Int,
@@ -129,11 +130,17 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         ) =
           payments
             .recordAuthorization(o, a, m, auth)
-            .flatTap(p => recorded.update(_ :+ p))
+            .flatTap {
+              case Some(p) => recorded.update(_ :+ p)
+              case None    => IO.unit
+            }
         def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
           payments
             .recordDecline(o, a, m, r)
-            .flatTap(p => recorded.update(_ :+ p))
+            .flatTap {
+              case Some(p) => recorded.update(_ :+ p)
+              case None    => IO.unit
+            }
       }
       _ <- f0
         .copy(payments = spying)
@@ -205,6 +212,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def update(id: String, s: PaymentStatus) = f.payments.update(id, s)
         def delete(id: String) = f.payments.delete(id)
         def ping = f.payments.ping
+        def findByOrderId(o: String) = f.payments.findByOrderId(o)
         def recordAuthorization(
             o: String,
             a: Int,
@@ -228,6 +236,236 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       assert(response.fold(_ => true, _.status.code >= 500), response)
       assertEquals(released.size, 1)
       assert(released.head.startsWith("auth_"))
+    }
+  }
+
+  private def post(
+      routes: org.http4s.HttpRoutes[IO],
+      req: AuthorizePaymentRequest
+  ): IO[Response[IO]] =
+    routes.orNotFound.run(
+      Request[IO](Method.POST, uri"/payments/authorize").withEntity(req)
+    )
+
+  private def countingGateway(
+      calls: cats.effect.Ref[IO, Int],
+      voided: cats.effect.Ref[IO, List[String]]
+  ): PaymentGatewayClient[IO] =
+    new PaymentGatewayClient[IO] {
+      def authorize(token: String, amount: Int) =
+        calls.update(_ + 1) *> gateway.authorize(token, amount)
+      def capture(authId: String) = gateway.capture(authId)
+      def void(authId: String) = voided.update(_ :+ authId)
+    }
+
+  test(
+    "a repeated authorize replays the same authId without a second gateway call or outbox row"
+  ) {
+    for {
+      f <- fixture
+      calls <- cats.effect.Ref.of[IO, Int](0)
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      routes = AuthorizeRoutes.routes[IO](
+        f.payments,
+        f.methods,
+        countingGateway(calls, voided),
+        NoOpLogger[IO]
+      )
+      req = AuthorizePaymentRequest("order-replay", 4999, f.approveId)
+      first <- post(routes, req)
+      second <- post(routes, req)
+      firstBody <- first.as[AuthorizePaymentResponse]
+      secondBody <- second.as[AuthorizePaymentResponse]
+      gatewayCalls <- calls.get
+      voidedIds <- voided.get
+      events <- f.outbox.get
+    } yield {
+      assertEquals(first.status, Status.Ok)
+      assertEquals(second.status, Status.Ok)
+      assertEquals(secondBody, firstBody)
+      assertEquals(gatewayCalls, 1)
+      assertEquals(voidedIds, Nil)
+      assertEquals(events.size, 1)
+    }
+  }
+
+  test("a replayed decline returns the stored 402 reason") {
+    for {
+      f <- fixture
+      calls <- cats.effect.Ref.of[IO, Int](0)
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      routes = AuthorizeRoutes.routes[IO](
+        f.payments,
+        f.methods,
+        countingGateway(calls, voided),
+        NoOpLogger[IO]
+      )
+      req = AuthorizePaymentRequest("order-decline-replay", 4999, f.declineId)
+      first <- post(routes, req)
+      second <- post(routes, req)
+      firstBody <- first.as[DeclinedResponse]
+      secondBody <- second.as[DeclinedResponse]
+      gatewayCalls <- calls.get
+      events <- f.outbox.get
+    } yield {
+      assertEquals(first.status, Status.PaymentRequired)
+      assertEquals(second.status, Status.PaymentRequired)
+      assertEquals(secondBody, firstBody)
+      assertEquals(gatewayCalls, 1)
+      assertEquals(events, Nil)
+    }
+  }
+
+  test("a different amount for the same order returns 409 and places no hold") {
+    for {
+      f <- fixture
+      calls <- cats.effect.Ref.of[IO, Int](0)
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      routes = AuthorizeRoutes.routes[IO](
+        f.payments,
+        f.methods,
+        countingGateway(calls, voided),
+        NoOpLogger[IO]
+      )
+      _ <- post(
+        routes,
+        AuthorizePaymentRequest("order-amount", 4999, f.approveId)
+      )
+      conflict <- post(
+        routes,
+        AuthorizePaymentRequest("order-amount", 5000, f.approveId)
+      )
+      body <- conflict.as[ErrorResponse]
+      gatewayCalls <- calls.get
+      events <- f.outbox.get
+    } yield {
+      assertEquals(conflict.status, Status.Conflict)
+      assertEquals(
+        body.error,
+        "Order already has a payment with a different amount or payment method"
+      )
+      assertEquals(gatewayCalls, 1)
+      assertEquals(events.size, 1)
+    }
+  }
+
+  test("a different payment method for the same order returns 409") {
+    for {
+      f <- fixture
+      calls <- cats.effect.Ref.of[IO, Int](0)
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      routes = AuthorizeRoutes.routes[IO](
+        f.payments,
+        f.methods,
+        countingGateway(calls, voided),
+        NoOpLogger[IO]
+      )
+      _ <- post(
+        routes,
+        AuthorizePaymentRequest("order-method", 4999, f.approveId)
+      )
+      conflict <- post(
+        routes,
+        AuthorizePaymentRequest("order-method", 4999, f.declineId)
+      )
+      gatewayCalls <- calls.get
+    } yield {
+      assertEquals(conflict.status, Status.Conflict)
+      assertEquals(gatewayCalls, 1)
+    }
+  }
+
+  test(
+    "losing an insert race voids the fresh hold and replays the winning outcome"
+  ) {
+    for {
+      f <- fixture
+      winner <- f.payments
+        .recordAuthorization(
+          "order-race",
+          4999,
+          f.approveId,
+          Authorization("auth_winner", java.time.Instant.parse("2026-11-03T12:00:00Z"))
+        )
+        .map(_.getOrElse(fail("expected the winner row")))
+      lookups <- cats.effect.Ref.of[IO, Int](0)
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      racingStore = new PaymentStore[IO] {
+        def create(o: String, a: Int) = f.payments.create(o, a)
+        def get(id: String) = f.payments.get(id)
+        def update(id: String, s: PaymentStatus) = f.payments.update(id, s)
+        def delete(id: String) = f.payments.delete(id)
+        def ping = f.payments.ping
+        def findByOrderId(o: String) =
+          lookups.modify(n => (n + 1, n)).flatMap { n =>
+            if (n == 0) IO.pure(None) else f.payments.findByOrderId(o)
+          }
+        def recordAuthorization(
+            o: String,
+            a: Int,
+            m: String,
+            auth: Authorization
+        ) = IO.pure(None)
+        def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
+          f.payments.recordDecline(o, a, m, r)
+      }
+      routes = AuthorizeRoutes.routes[IO](
+        racingStore,
+        f.methods,
+        countingGateway(cats.effect.Ref.unsafe[IO, Int](0), voided),
+        NoOpLogger[IO]
+      )
+      response <- post(
+        routes,
+        AuthorizePaymentRequest("order-race", 4999, f.approveId)
+      )
+      body <- response.as[AuthorizePaymentResponse]
+      released <- voided.get
+    } yield {
+      assertEquals(response.status, Status.Ok)
+      assertEquals(body.authId, "auth_winner")
+      assertEquals(released.size, 1)
+      assert(released.head.startsWith("auth_"))
+      assertNotEquals(released.head, winner.authId.getOrElse(""))
+    }
+  }
+
+  test("a missing row after an insert conflict returns 500") {
+    for {
+      f <- fixture
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      racingStore = new PaymentStore[IO] {
+        def create(o: String, a: Int) = f.payments.create(o, a)
+        def get(id: String) = f.payments.get(id)
+        def update(id: String, s: PaymentStatus) = f.payments.update(id, s)
+        def delete(id: String) = f.payments.delete(id)
+        def ping = f.payments.ping
+        def findByOrderId(o: String) = IO.pure(None)
+        def recordAuthorization(
+            o: String,
+            a: Int,
+            m: String,
+            auth: Authorization
+        ) = IO.pure(None)
+        def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
+          f.payments.recordDecline(o, a, m, r)
+      }
+      routes = AuthorizeRoutes.routes[IO](
+        racingStore,
+        f.methods,
+        countingGateway(cats.effect.Ref.unsafe[IO, Int](0), voided),
+        NoOpLogger[IO]
+      )
+      response <- post(
+        routes,
+        AuthorizePaymentRequest("order-missing", 4999, f.approveId)
+      )
+      body <- response.as[ErrorResponse]
+      released <- voided.get
+    } yield {
+      assertEquals(response.status, Status.InternalServerError)
+      assertEquals(body.error, "Payment could not be recorded or read back")
+      assertEquals(released.size, 1)
     }
   }
 }

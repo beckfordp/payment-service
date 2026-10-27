@@ -160,7 +160,7 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
             status =>
               stmt.executeUpdate(
                 "insert into \"payment\" (id, order_id, amount_cents, status) " +
-                  s"values (gen_random_uuid(), 'order-1', 100, '$status')"
+                  s"values (gen_random_uuid(), 'order-$status', 100, '$status')"
               )
           }
         } finally conn.close()
@@ -192,6 +192,41 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
                 "insert into \"payment\" (id, order_id, amount_cents, status) " +
                   "values (gen_random_uuid(), 'order-1', 100, 'settled')"
               )
+          }
+        } finally conn.close()
+      }
+    }
+  }
+
+  test(
+    "running migrations rejects a second payment row for the same order (TD-10.1)"
+  ) {
+    withContainers { postgres =>
+      val config = PostgresConfig(
+        host = postgres.host,
+        port = postgres.mappedPort(5432),
+        database = postgres.databaseName,
+        user = postgres.username,
+        password = postgres.password
+      )
+
+      Migrations.run[IO](config).map { _ =>
+        val conn = DriverManager.getConnection(
+          postgres.jdbcUrl,
+          postgres.username,
+          postgres.password
+        )
+        try {
+          val stmt = conn.createStatement()
+          stmt.executeUpdate(
+            "insert into \"payment\" (id, order_id, amount_cents, status) " +
+              "values (gen_random_uuid(), 'unique-order-1', 100, 'pending')"
+          )
+          intercept[java.sql.SQLException] {
+            stmt.executeUpdate(
+              "insert into \"payment\" (id, order_id, amount_cents, status) " +
+                "values (gen_random_uuid(), 'unique-order-1', 200, 'authorized')"
+            )
           }
         } finally conn.close()
       }
