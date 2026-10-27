@@ -34,9 +34,13 @@ object Main extends IOApp.Simple {
     )
     store <- PaymentStore.postgres[IO](config.postgres, telemetry.meter)
     methods <- PaymentMethodStore.postgres[IO](config.postgres, telemetry.meter)
+    gateway = PaymentGatewayClient.simulated[IO](
+      config.paymentGateway.simulated
+    )
     routes = AppRoutes.all[IO](
       store,
       methods,
+      gateway,
       telemetry,
       AsyncApiChannels.channels
     )

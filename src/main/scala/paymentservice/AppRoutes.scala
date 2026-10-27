@@ -24,6 +24,7 @@ object AppRoutes {
   def all[F[_]: Async](
       store: PaymentStore[F],
       methods: PaymentMethodStore[F],
+      gateway: PaymentGatewayClient[F],
       telemetry: Telemetry[F],
       channels: List[AsyncApiChannel[?]]
   ): HttpRoutes[F] = {
@@ -41,6 +42,12 @@ object AppRoutes {
           .deletePaymentServerEndpoint[F](store, telemetry.logger),
         PaymentMethodRoutes
           .createMethodServerEndpoint[F](methods, telemetry.logger),
+        AuthorizeRoutes.authorizeServerEndpoint[F](
+          store,
+          methods,
+          gateway,
+          telemetry.logger
+        ),
         HealthRoutes.healthServerEndpoint[F],
         HealthRoutes.readyServerEndpoint[F](store)
       )

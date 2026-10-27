@@ -52,4 +52,37 @@ class PaymentDocsSuite extends CatsEffectSuite {
       docsBody <- docsResponse.bodyText.compile.string
     } yield assert(clue(docsBody).contains("/payments/methods"))
   }
+
+  test("POST /payments/authorize is documented with its 402 decline") {
+    for {
+      payments <- PaymentStore.inMemory[IO]
+      methods <- PaymentMethodStore.inMemory[IO]
+      gateway = PaymentGatewayClient.simulated[IO](
+        SimulatedGatewayConfig(
+          GatewayOutcome.Approve,
+          Map.empty,
+          scala.concurrent.duration.Duration(1, "day")
+        )
+      )
+      routes = Docs.routes[IO](
+        "Payment Service",
+        "1.0",
+        List(
+          AuthorizeRoutes.authorizeServerEndpoint[IO](
+            payments,
+            methods,
+            gateway,
+            NoOpLogger[IO]
+          )
+        )
+      )
+      docsResponse <- routes.orNotFound.run(
+        Request[IO](Method.GET, uri"/docs/docs.yaml")
+      )
+      docsBody <- docsResponse.bodyText.compile.string
+    } yield {
+      assert(clue(docsBody).contains("/payments/authorize"))
+      assert(clue(docsBody).contains("'402'"))
+    }
+  }
 }
