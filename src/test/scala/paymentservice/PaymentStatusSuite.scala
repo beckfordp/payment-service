@@ -18,10 +18,10 @@ class PaymentStatusSuite extends CatsEffectSuite {
     )
   }
 
-  test("fromString parses \"settled\" as Settled") {
+  test("fromString parses \"captured\" as Captured") {
     assertEquals(
-      PaymentStatus.fromString("settled"),
-      Right(PaymentStatus.Settled)
+      PaymentStatus.fromString("captured"),
+      Right(PaymentStatus.Captured)
     )
   }
 
@@ -32,6 +32,10 @@ class PaymentStatusSuite extends CatsEffectSuite {
     )
   }
 
+  test("fromString rejects the retired \"settled\" value") {
+    assert(PaymentStatus.fromString("settled").isLeft)
+  }
+
   test("fromString rejects an unrecognized value") {
     assert(PaymentStatus.fromString("bogus").isLeft)
   }
@@ -40,7 +44,7 @@ class PaymentStatusSuite extends CatsEffectSuite {
     List(
       PaymentStatus.Pending,
       PaymentStatus.Authorized,
-      PaymentStatus.Settled,
+      PaymentStatus.Captured,
       PaymentStatus.Failed
     ).foreach { status =>
       assertEquals(PaymentStatus.fromString(status.asString), Right(status))

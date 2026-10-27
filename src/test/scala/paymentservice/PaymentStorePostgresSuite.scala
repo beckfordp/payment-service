@@ -169,7 +169,7 @@ class PaymentStorePostgresSuite
   }
 
   test(
-    "update to Settled writes no outbox row (no event until the authorize/capture producers land)"
+    "update to Captured writes no outbox row (no event until the authorize/capture producers land)"
   ) {
     withContainers { postgres =>
       val config = configFor(postgres)
@@ -181,9 +181,9 @@ class PaymentStorePostgresSuite
               "3fa85f64-5717-4562-b3fc-2c963f66afa6",
               4999
             )
-            updated <- store.update(created.id, PaymentStatus.Settled)
+            updated <- store.update(created.id, PaymentStatus.Captured)
           } yield {
-            assertEquals(updated.map(_.status), Some(PaymentStatus.Settled))
+            assertEquals(updated.map(_.status), Some(PaymentStatus.Captured))
             assertEquals(
               outboxRowsForOrder(
                 postgres,
@@ -197,7 +197,7 @@ class PaymentStorePostgresSuite
   }
 
   test(
-    "update to a non-Settled status writes no outbox row"
+    "update to a non-Captured status writes no outbox row"
   ) {
     withContainers { postgres =>
       val config = configFor(postgres)
@@ -231,7 +231,7 @@ class PaymentStorePostgresSuite
         .use { store =>
           val unknownId = java.util.UUID.randomUUID().toString
           store
-            .update(unknownId, PaymentStatus.Settled)
+            .update(unknownId, PaymentStatus.Captured)
             .map { result =>
               assertEquals(result, None)
               assertEquals(

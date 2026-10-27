@@ -156,11 +156,41 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
         )
         try {
           val stmt = conn.createStatement()
-          List("pending", "authorized", "settled", "failed").foreach { status =>
+          List("pending", "authorized", "captured", "failed").foreach { status =>
             stmt.executeUpdate(
               "insert into \"payment\" (id, order_id, amount_cents, status) " +
                 s"values (gen_random_uuid(), 'order-1', 100, '$status')"
             )
+          }
+        } finally conn.close()
+      }
+    }
+  }
+
+  test("running migrations' CHECK constraint rejects the retired 'settled'") {
+    withContainers { postgres =>
+      val config = PostgresConfig(
+        host = postgres.host,
+        port = postgres.mappedPort(5432),
+        database = postgres.databaseName,
+        user = postgres.username,
+        password = postgres.password
+      )
+
+      Migrations.run[IO](config).map { _ =>
+        val conn = DriverManager.getConnection(
+          postgres.jdbcUrl,
+          postgres.username,
+          postgres.password
+        )
+        try {
+          intercept[java.sql.SQLException] {
+            conn
+              .createStatement()
+              .executeUpdate(
+                "insert into \"payment\" (id, order_id, amount_cents, status) " +
+                  "values (gen_random_uuid(), 'order-1', 100, 'settled')"
+              )
           }
         } finally conn.close()
       }

@@ -238,7 +238,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
   }
 
   test(
-    "PATCH /payments/{id} accepts \"settled\" and \"failed\" statuses"
+    "PATCH /payments/{id} accepts \"captured\" and \"failed\" statuses"
   ) {
     for {
       store <- PaymentStore.inMemory[IO]
@@ -249,19 +249,19 @@ class PaymentRoutesSuite extends CatsEffectSuite {
         )
       )
       created <- postResponse.as[PaymentResponse]
-      settledResponse <- routes.orNotFound.run(
+      capturedResponse <- routes.orNotFound.run(
         Request[IO](Method.PATCH, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("settled"))
+          .withEntity(UpdatePaymentRequest("captured"))
       )
-      settled <- settledResponse.as[PaymentResponse]
+      captured <- capturedResponse.as[PaymentResponse]
       failedResponse <- routes.orNotFound.run(
         Request[IO](Method.PATCH, uri"/payments" / created.id)
           .withEntity(UpdatePaymentRequest("failed"))
       )
       failed <- failedResponse.as[PaymentResponse]
     } yield {
-      assertEquals(settledResponse.status, Status.Ok)
-      assertEquals(settled.status, "settled")
+      assertEquals(capturedResponse.status, Status.Ok)
+      assertEquals(captured.status, "captured")
       assertEquals(failedResponse.status, Status.Ok)
       assertEquals(failed.status, "failed")
     }
