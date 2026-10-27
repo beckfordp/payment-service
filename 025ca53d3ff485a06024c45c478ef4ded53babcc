@@ -1,0 +1,1 @@
+Phase 1 'Domain foundations' verification. Automated: sbt coverage test coverageReport -> 103/103 passed, new files ~100% coverage. Manual (/prompt off): scripts/verify-domain-foundations.sh run live against sbt run + docker postgres: ready 200, flyway V4 success, PATCH status=authorized -> 200 + row stored authorized. All checks passed.
