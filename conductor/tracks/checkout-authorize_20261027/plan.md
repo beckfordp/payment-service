@@ -23,6 +23,7 @@
 - [x] Task: Conductor - User Manual Verification 'Authorize' (Protocol in workflow.md) — `/prompt off`: ran `scripts/verify-checkout-authorize.sh` live (200 + Authorized row + 1 outbox row; 402 insufficient_funds + Failed row, no outbox; 404; 400) — all passed `b55c1f8`
 
 ## Phase 4: Docs sync
+- [x] Task: Rename `Settled` → `Captured` (user decision 2026-10-27; V7 migration, ADR 0011 amended) `bf1cc5c`
 - [ ] Task: Diff `/docs` OpenAPI vs `gluon/docs/system-design.md` REST contracts; fix drift (gluon commit separate)
 - [ ] Task: Update `product.md` (domain model, US-12.1/13.1/13.2/14.1 done), `tech-stack.md` (gateway config, outbox writer), README endpoints
 
