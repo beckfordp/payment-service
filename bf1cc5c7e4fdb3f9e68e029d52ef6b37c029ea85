@@ -1,0 +1,1 @@
+Rename PaymentStatus.Settled -> Captured ('captured'), matching PaymentCaptured event + gateway capture op (ADR 0011 amendment 2026-10-27). V7 migration converts existing rows + swaps CHECK value; V4 left untouched (Flyway checksum). Tests updated; new test: 'settled' rejected by CHECK and fromString. 135/135; verify-checkout-authorize.sh passed live.
