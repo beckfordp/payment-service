@@ -1,7 +1,7 @@
 # Plan: Checkout Journey 1 payment-service — gateway, payment methods, authorize
 
 ## Phase 1: Domain foundations
-- [ ] Task: `PaymentStatus.Authorized` — failing `PaymentStatusSuite`/`MigrationsSuite` cases (Red); add case + `V4__add_authorized_status.sql` widening `payment_status_check`; Settled doc comment → "captured" (Green)
+- [x] Task: `PaymentStatus.Authorized` — failing `PaymentStatusSuite`/`MigrationsSuite` cases (Red); add case + `V4__add_authorized_status.sql` widening `payment_status_check`; Settled doc comment → "captured" (Green) `0b0e98f`
 - [ ] Task: `Address` + validation (US-12.1) — failing `AddressSuite` (blank line1/city/postalCode, bad country, optional line2) (Red); implement `Address` + circe/tapir codecs + `validate` (Green)
 - [ ] Task: Card validation + simulated tokenizer — failing `CardSuite` (Luhn, 13–19 digits, spaces stripped, brand prefixes incl. 2221–2720, MM/YY bad month/past expiry with injected clock, `tok_<brand>_<last4>`) (Red); implement `Card` (Green)
 - [ ] Task: `PaymentGatewayClient[F]` + `simulated` — failing `PaymentGatewayClientSuite` (approve, decline:reason, default-outcome, TTL → expiresAt, `auth_` prefix, capture/void succeed) + `PaymentServiceConfigSuite` (parses `payment-gateway.simulated`, rejects bad outcome string) (Red); implement algebra, `SimulatedGatewayConfig` ConfigReader, `application.conf` block (default approve, `tok_visa_0002` → `decline:insufficient_funds`, ttl 7d) (Green)
