@@ -5,8 +5,8 @@
 - [x] Task: `Address` + validation (US-12.1) — failing `AddressSuite` (blank line1/city/postalCode, bad country, optional line2) (Red); implement `Address` + circe/tapir codecs + `validate` (Green) `fd8c87f`
 - [x] Task: Card validation + simulated tokenizer — failing `CardSuite` (Luhn, 13–19 digits, spaces stripped, brand prefixes incl. 2221–2720, MM/YY bad month/past expiry with injected clock, `tok_<brand>_<last4>`) (Red); implement `Card` (Green) `f149a17`
 - [x] Task: `PaymentGatewayClient[F]` + `simulated` — failing `PaymentGatewayClientSuite` (approve, decline:reason, default-outcome, TTL → expiresAt, `auth_` prefix, capture/void succeed) + `PaymentServiceConfigSuite` (parses `payment-gateway.simulated`, rejects bad outcome string) (Red); implement algebra, `SimulatedGatewayConfig` ConfigReader, `application.conf` block (default approve, `tok_visa_0002` → `decline:insufficient_funds`, ttl 7d) (Green) `f0ec4d8`
-- [ ] Task: Full `sbt test` + coverage >80% new code
-- [ ] Task: Conductor - User Manual Verification 'Domain foundations' (Protocol in workflow.md)
+- [x] Task: Full `sbt test` + coverage >80% new code — 103/103; new files ~100% stmt/branch (overall 89.62%/96.25%)
+- [x] Task: Conductor - User Manual Verification 'Domain foundations' (Protocol in workflow.md) — `/prompt off`: ran `scripts/verify-domain-foundations.sh` live (boot w/ gateway config, V4 applied, PATCH→authorized stored) — all passed `c1815a0`
 
 ## Phase 2: Payment methods (US-13.1, US-13.2)
 - [ ] Task: `PaymentMethodStore[F]` — failing `PaymentMethodStoreSuite` (inMemory create/get) + `PaymentMethodStorePostgresSuite` (round-trip, billing JSONB, schema has no PAN column) (Red); `V5__create_payment_methods.sql`, `inMemory`/`postgres` with `timed` telemetry (Green)
