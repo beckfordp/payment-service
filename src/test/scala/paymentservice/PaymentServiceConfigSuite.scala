@@ -4,6 +4,8 @@ import cats.effect.IO
 import munit.CatsEffectSuite
 import pureconfig.ConfigSource
 
+import scala.concurrent.duration._
+
 class PaymentServiceConfigSuite extends CatsEffectSuite {
 
   private val validHocon =
@@ -17,6 +19,13 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
       |  database = "payment"
       |  user = "payment"
       |  password = "payment"
+      |}
+      |payment-gateway.simulated {
+      |  default-outcome = "approve"
+      |  outcomes {
+      |    "tok_visa_0002" = "decline:insufficient_funds"
+      |  }
+      |  authorization-ttl = 7d
       |}
       |""".stripMargin
 
@@ -36,9 +45,26 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
             database = "payment",
             user = "payment",
             password = "payment"
+          ),
+          paymentGateway = PaymentGatewayConfig(
+            SimulatedGatewayConfig(
+              defaultOutcome = GatewayOutcome.Approve,
+              outcomes = Map(
+                "tok_visa_0002" -> GatewayOutcome.Decline("insufficient_funds")
+              ),
+              authorizationTtl = 7.days
+            )
           )
         )
       )
+    )
+  }
+
+  test("fails to load when a gateway outcome string is invalid") {
+    val badOutcome =
+      validHocon + "payment-gateway.simulated.outcomes.\"tok_visa_4242\" = \"maybe\"\n"
+    assert(
+      ConfigSource.string(badOutcome).load[PaymentServiceConfig].isLeft
     )
   }
 
@@ -76,6 +102,16 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
           "payment",
           "payment",
           "payment"
+        )
+      )
+      assertEquals(
+        config.paymentGateway.simulated,
+        SimulatedGatewayConfig(
+          defaultOutcome = GatewayOutcome.Approve,
+          outcomes = Map(
+            "tok_visa_0002" -> GatewayOutcome.Decline("insufficient_funds")
+          ),
+          authorizationTtl = 7.days
         )
       )
     }

@@ -15,7 +15,8 @@ final case class PaymentServiceConfig(
     port: Int,
     metricsPort: Int,
     serviceName: String,
-    postgres: PostgresConfig
+    postgres: PostgresConfig,
+    paymentGateway: PaymentGatewayConfig
 ) derives ConfigReader
 
 object PaymentServiceConfig {
