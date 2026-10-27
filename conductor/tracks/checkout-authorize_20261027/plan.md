@@ -24,7 +24,7 @@
 
 ## Phase 4: Docs sync
 - [x] Task: Rename `Settled` → `Captured` (user decision 2026-10-27; V7 migration, ADR 0011 amended) `bf1cc5c`
-- [ ] Task: Diff `/docs` OpenAPI vs `gluon/docs/system-design.md` REST contracts; fix drift (gluon commit separate)
-- [ ] Task: Update `product.md` (domain model, US-12.1/13.1/13.2/14.1 done), `tech-stack.md` (gateway config, outbox writer), README endpoints
+- [x] Task: Diff `/docs` OpenAPI vs `gluon/docs/system-design.md` REST contracts; fix drift (gluon commit separate) — only drift: authorize 400 undocumented; fixed in gluon
+- [x] Task: Update `product.md` (domain model, US-12.1/13.1/13.2/14.1 done), `tech-stack.md` (gateway config, outbox writer), README endpoints
 
 Note: decline test card = Luhn-valid visa ending 0002 (e.g. 4000 0000 0000 0002) → `tok_visa_0002`.

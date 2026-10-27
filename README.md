@@ -46,6 +46,13 @@ curl -X PUT http://localhost:8080/payments/<id> \
 # Delete it
 curl -X DELETE http://localhost:8080/payments/<id>
 
+# Checkout (Journey 1): store a card, then authorize against it.
+# 4000 0000 0000 0002 declines (tok_visa_0002 in application.conf).
+curl -X POST http://localhost:8080/payments/methods \
+  -H "Content-Type: application/json" -d '{"customerId":"c1","cardNumber":"4242 4242 4242 4242","expiry":"12/30","billingAddress":{"line1":"1 High St","line2":null,"city":"London","postalCode":"SW1A 1AA","country":"GB"}}'
+curl -X POST http://localhost:8080/payments/authorize \
+  -H "Content-Type: application/json" -d '{"orderId":"<order-uuid>","amountCents":4999,"paymentMethodId":"<method-id>"}'
+
 # Liveness / readiness
 curl http://localhost:8080/health
 curl http://localhost:8080/health/ready

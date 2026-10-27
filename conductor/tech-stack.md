@@ -18,12 +18,21 @@
 - No Kafka consumer/producer runtime in this service today: payment
   authorization is a synchronous REST call (2026-10-26 decision), and the four
   `payment-events` contracts are published through the `outbox_events` table +
-  Debezium CDC once Checkout Journeys 1/4/5 add their producers. The old
+  Debezium CDC. `PaymentAuthorized` is written in the same transaction as its
+  `Authorized` payment row (`PaymentStore.recordAuthorization`, Journey 1);
+  the other three land with Journeys 4/5. The old
   `OrderReservedConsumer`/`KafkaConsumers`/fs2-kafka wiring was retired by
   Rework 7.
 - purekafka (`io.github.beckfordp`) — supplies the `purekafka.docs` AsyncAPI
   types (`AsyncApiChannel`, `PublisherKind.Cdc`); no supervision/DLQ usage
   until a consumer returns.
+
+## Payment gateway
+- `PaymentGatewayClient[F]` (`authorize`/`capture`/`void`, ADR 0011) — only a
+  `simulated` interpreter, no real provider, no network. Outcome keyed by
+  simulated card token from PureConfig `payment-gateway.simulated`
+  (`default-outcome`, `outcomes { "tok_visa_0002" = "decline:insufficient_funds" }`,
+  `authorization-ttl = 7d`). Added 2026-10-27 (`checkout-authorize_20261027`).
 
 ## API layer
 - tapir 1.11.25 — route definitions and generated Swagger/OpenAPI docs
