@@ -33,6 +33,14 @@ class CardSuite extends FunSuite {
     assertEquals(validate("4242-4242-4242-4242"), Left("Invalid card number"))
   }
 
+  test("rejects non-ASCII digits that Char.isDigit would accept") {
+    // U+0664 ARABIC-INDIC DIGIT FOUR in place of each '4' of a valid number.
+    assertEquals(
+      validate("4242424242424242".replace('4', '\u0664')),
+      Left("Invalid card number")
+    )
+  }
+
   test("rejects fewer than 13 or more than 19 digits") {
     // Both Luhn-valid, so only the length rule rejects them.
     assertEquals(validate("424242424242"), Left("Invalid card number"))

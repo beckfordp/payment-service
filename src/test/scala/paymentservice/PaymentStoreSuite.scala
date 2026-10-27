@@ -84,10 +84,17 @@ class PaymentStoreSuite extends CatsEffectSuite {
   private val authorization =
     Authorization("auth_1", Instant.parse("2026-11-03T12:00:00Z"))
 
-  test("recordAuthorization stores an Authorized payment and one outbox event") {
+  test(
+    "recordAuthorization stores an Authorized payment and one outbox event"
+  ) {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
-      payment <- store.recordAuthorization("order-1", 4999, "pm-1", authorization)
+      payment <- store.recordAuthorization(
+        "order-1",
+        4999,
+        "pm-1",
+        authorization
+      )
       found <- store.get(payment.id)
       events <- outbox.get
     } yield {
@@ -110,7 +117,9 @@ class PaymentStoreSuite extends CatsEffectSuite {
     }
   }
 
-  test("recordDecline stores a Failed payment with its reason and no outbox event") {
+  test(
+    "recordDecline stores a Failed payment with its reason and no outbox event"
+  ) {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
       payment <- store.recordDecline(

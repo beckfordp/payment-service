@@ -156,11 +156,12 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
         )
         try {
           val stmt = conn.createStatement()
-          List("pending", "authorized", "captured", "failed").foreach { status =>
-            stmt.executeUpdate(
-              "insert into \"payment\" (id, order_id, amount_cents, status) " +
-                s"values (gen_random_uuid(), 'order-1', 100, '$status')"
-            )
+          List("pending", "authorized", "captured", "failed").foreach {
+            status =>
+              stmt.executeUpdate(
+                "insert into \"payment\" (id, order_id, amount_cents, status) " +
+                  s"values (gen_random_uuid(), 'order-1', 100, '$status')"
+              )
           }
         } finally conn.close()
       }

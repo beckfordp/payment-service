@@ -7,10 +7,10 @@ import org.typelevel.otel4s.metrics.Meter
 
 import scala.concurrent.duration.SECONDS
 
-/** Times a Skunk query, recording a `db.client.operation.duration`
-  * measurement tagged with `db.system`/`db.operation` (OTel semantic-convention
-  * names), plus `error.type` if it fails. Shared by every Postgres-backed store
-  * in this service rather than a new purerest combinator.
+/** Times a Skunk query, recording a `db.client.operation.duration` measurement
+  * tagged with `db.system`/`db.operation` (OTel semantic-convention names),
+  * plus `error.type` if it fails. Shared by every Postgres-backed store in this
+  * service rather than a new purerest combinator.
   */
 trait DbTimer[F[_]] {
   def timed[A](operation: String)(fa: F[A]): F[A]

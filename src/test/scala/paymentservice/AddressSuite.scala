@@ -51,7 +51,10 @@ class AddressSuite extends FunSuite {
 
   test("JSON round-trips with line2 null when absent") {
     val json = valid.asJson
-    assertEquals(json.hcursor.downField("line2").focus.map(_.isNull), Some(true))
+    assertEquals(
+      json.hcursor.downField("line2").focus.map(_.isNull),
+      Some(true)
+    )
     assertEquals(decode[Address](json.noSpaces), Right(valid))
   }
 }

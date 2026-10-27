@@ -52,7 +52,8 @@ object AuthorizeError {
   */
 object AuthorizeRoutes {
 
-  private val invalidVariant: EndpointOutput.OneOfVariant[AuthorizeError.Invalid] =
+  private val invalidVariant
+      : EndpointOutput.OneOfVariant[AuthorizeError.Invalid] =
     oneOfVariant(
       statusCode(StatusCode.BadRequest)
         .and(jsonBody[ErrorResponse])
@@ -124,6 +125,9 @@ object AuthorizeRoutes {
                 method.id,
                 authorization
               )
+              // Don't leave an unrecorded hold at the gateway if persisting
+              // the authorization fails - release it before the 500.
+              .onError { case _ => gateway.void(authorization.authId) }
               .flatMap { payment =>
                 logger
                   .info(context + ("payment_id" -> payment.id))(

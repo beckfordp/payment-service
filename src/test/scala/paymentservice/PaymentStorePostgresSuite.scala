@@ -471,7 +471,10 @@ class PaymentStorePostgresSuite
     }
   }
 
-  private def query(postgres: PostgreSQLContainer, sql: String): List[String] = {
+  private def query(
+      postgres: PostgreSQLContainer,
+      sql: String
+  ): List[String] = {
     val conn = DriverManager.getConnection(
       postgres.jdbcUrl,
       postgres.username,

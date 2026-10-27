@@ -48,14 +48,30 @@ object PaymentMethodResponse {
     )
 }
 
+sealed trait PaymentMethodError
+
+object PaymentMethodError {
+  final case class Invalid(error: String) extends PaymentMethodError
+}
+
 /** gshop-facing `POST /payments/methods` (US-13.2, billing address US-12.1) -
   * contract pinned in `gluon/docs/system-design.md`'s "REST contracts".
   */
 object PaymentMethodRoutes {
 
+  private val invalidVariant
+      : EndpointOutput.OneOfVariant[PaymentMethodError.Invalid] =
+    oneOfVariant(
+      statusCode(StatusCode.BadRequest)
+        .and(jsonBody[ErrorResponse])
+        .map[PaymentMethodError.Invalid](e =>
+          PaymentMethodError.Invalid(e.error)
+        )(e => ErrorResponse(e.error))
+    )
+
   private val createMethodEndpoint: PublicEndpoint[
     CreatePaymentMethodRequest,
-    ErrorResponse,
+    PaymentMethodError,
     PaymentMethodResponse,
     Any
   ] =
@@ -64,7 +80,7 @@ object PaymentMethodRoutes {
       .in(jsonBody[CreatePaymentMethodRequest])
       .out(statusCode(StatusCode.Created))
       .out(jsonBody[PaymentMethodResponse])
-      .errorOut(statusCode(StatusCode.BadRequest).and(jsonBody[ErrorResponse]))
+      .errorOut(oneOf[PaymentMethodError](invalidVariant))
 
   private def validate(
       req: CreatePaymentMethodRequest,
@@ -91,11 +107,14 @@ object PaymentMethodRoutes {
           context ++ Map("method" -> "POST", "path" -> "/payments/methods")
         )("Received request")
         now <- Async[F].realTimeInstant
-        result <- validate(req, YearMonth.from(now.atZone(ZoneOffset.UTC))) match {
+        result <- validate(
+          req,
+          YearMonth.from(now.atZone(ZoneOffset.UTC))
+        ) match {
           case Left(error) =>
             logger
               .warn(context + ("error" -> error))("Invalid payment method")
-              .as(Left(ErrorResponse(error)))
+              .as(Left(PaymentMethodError.Invalid(error)))
           case Right((card, address)) =>
             store
               .create(req.customerId, card, address)

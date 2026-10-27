@@ -12,9 +12,9 @@ final case class DeclineReason(value: String)
 
 final case class Authorization(authId: String, expiresAt: Instant)
 
-/** ADR 0011's provider seam. Only `simulated` exists - a real provider
-  * (Stripe or otherwise) is a future ADR's decision. `capture`/`void` have no
-  * callers until Checkout Journeys 3/4.
+/** ADR 0011's provider seam. Only `simulated` exists - a real provider (Stripe
+  * or otherwise) is a future ADR's decision. `capture`/`void` have no callers
+  * until Checkout Journeys 3/4.
   */
 trait PaymentGatewayClient[F[_]] {
   def authorize(
@@ -37,12 +37,16 @@ object GatewayOutcome {
     case "approve"              => Right(Approve)
     case declinePattern(reason) => Right(Decline(reason))
     case other                  =>
-      Left(s"Invalid gateway outcome '$other', expected approve or decline:<reason>")
+      Left(
+        s"Invalid gateway outcome '$other', expected approve or decline:<reason>"
+      )
   }
 
   implicit val reader: ConfigReader[GatewayOutcome] =
     ConfigReader[String].emap(raw =>
-      parse(raw).leftMap(pureconfig.error.CannotConvert(raw, "GatewayOutcome", _))
+      parse(raw).leftMap(
+        pureconfig.error.CannotConvert(raw, "GatewayOutcome", _)
+      )
     )
 }
 

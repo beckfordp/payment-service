@@ -41,15 +41,27 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     for {
       (payments, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
       methods <- PaymentMethodStore.inMemory[IO]
-      approve <- methods.create("c1", Card("4242", CardBrand.Visa, "12/99"), billing)
-      decline <- methods.create("c1", Card("0002", CardBrand.Visa, "12/99"), billing)
+      approve <- methods.create(
+        "c1",
+        Card("4242", CardBrand.Visa, "12/99"),
+        billing
+      )
+      decline <- methods.create(
+        "c1",
+        Card("0002", CardBrand.Visa, "12/99"),
+        billing
+      )
     } yield Fixture(payments, outbox, methods, approve.id, decline.id)
 
-  test("POST /payments/authorize returns 200 {authId, expiresAt} and records the outbox event") {
+  test(
+    "POST /payments/authorize returns 200 {authId, expiresAt} and records the outbox event"
+  ) {
     for {
       f <- fixture
       before <- IO.realTimeInstant
-      response <- f.authorize(AuthorizePaymentRequest("order-1", 4999, f.approveId))
+      response <- f.authorize(
+        AuthorizePaymentRequest("order-1", 4999, f.approveId)
+      )
       body <- response.as[AuthorizePaymentResponse]
       events <- f.outbox.get
     } yield {
@@ -61,10 +73,14 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     }
   }
 
-  test("POST /payments/authorize publishes the same authId/expiresAt it returns") {
+  test(
+    "POST /payments/authorize publishes the same authId/expiresAt it returns"
+  ) {
     for {
       f <- fixture
-      response <- f.authorize(AuthorizePaymentRequest("order-1", 4999, f.approveId))
+      response <- f.authorize(
+        AuthorizePaymentRequest("order-1", 4999, f.approveId)
+      )
       body <- response.as[AuthorizePaymentResponse]
       events <- f.outbox.get
       payload = events.head._2.payload.as[PaymentAuthorizedEvent].toOption.get
@@ -74,15 +90,22 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     }
   }
 
-  test("POST /payments/authorize returns 402 {error, reason} on decline, nothing published") {
+  test(
+    "POST /payments/authorize returns 402 {error, reason} on decline, nothing published"
+  ) {
     for {
       f <- fixture
-      response <- f.authorize(AuthorizePaymentRequest("order-2", 4999, f.declineId))
+      response <- f.authorize(
+        AuthorizePaymentRequest("order-2", 4999, f.declineId)
+      )
       body <- response.as[DeclinedResponse]
       events <- f.outbox.get
     } yield {
       assertEquals(response.status, Status.PaymentRequired)
-      assertEquals(body, DeclinedResponse("Payment declined", "insufficient_funds"))
+      assertEquals(
+        body,
+        DeclinedResponse("Payment declined", "insufficient_funds")
+      )
       assertEquals(events, Nil)
     }
   }
@@ -98,14 +121,25 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def update(id: String, s: PaymentStatus) = payments.update(id, s)
         def delete(id: String) = payments.delete(id)
         def ping = payments.ping
-        def recordAuthorization(o: String, a: Int, m: String, auth: Authorization) =
-          payments.recordAuthorization(o, a, m, auth).flatTap(p => recorded.update(_ :+ p))
+        def recordAuthorization(
+            o: String,
+            a: Int,
+            m: String,
+            auth: Authorization
+        ) =
+          payments
+            .recordAuthorization(o, a, m, auth)
+            .flatTap(p => recorded.update(_ :+ p))
         def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
-          payments.recordDecline(o, a, m, r).flatTap(p => recorded.update(_ :+ p))
+          payments
+            .recordDecline(o, a, m, r)
+            .flatTap(p => recorded.update(_ :+ p))
       }
-      _ <- f0.copy(payments = spying).authorize(
-        AuthorizePaymentRequest("order-2", 4999, f0.declineId)
-      )
+      _ <- f0
+        .copy(payments = spying)
+        .authorize(
+          AuthorizePaymentRequest("order-2", 4999, f0.declineId)
+        )
       all <- recorded.get
     } yield {
       assertEquals(all.map(_.status), List(PaymentStatus.Failed))
@@ -131,7 +165,9 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     for {
       f <- fixture
       zero <- f.authorize(AuthorizePaymentRequest("order-1", 0, f.approveId))
-      negative <- f.authorize(AuthorizePaymentRequest("order-1", -5, f.approveId))
+      negative <- f.authorize(
+        AuthorizePaymentRequest("order-1", -5, f.approveId)
+      )
       body <- zero.as[ErrorResponse]
       events <- f.outbox.get
     } yield {
@@ -150,6 +186,48 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     } yield {
       assertEquals(response.status, Status.BadRequest)
       assertEquals(body.error, "orderId is required")
+    }
+  }
+
+  test("POST /payments/authorize voids the hold when recording it fails") {
+    for {
+      f <- fixture
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      spyGateway = new PaymentGatewayClient[IO] {
+        def authorize(token: String, amount: Int) =
+          gateway.authorize(token, amount)
+        def capture(authId: String) = gateway.capture(authId)
+        def void(authId: String) = voided.update(_ :+ authId)
+      }
+      failingPayments = new PaymentStore[IO] {
+        def create(o: String, a: Int) = f.payments.create(o, a)
+        def get(id: String) = f.payments.get(id)
+        def update(id: String, s: PaymentStatus) = f.payments.update(id, s)
+        def delete(id: String) = f.payments.delete(id)
+        def ping = f.payments.ping
+        def recordAuthorization(
+            o: String,
+            a: Int,
+            m: String,
+            auth: Authorization
+        ) =
+          IO.raiseError(new RuntimeException("db down"))
+        def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
+          f.payments.recordDecline(o, a, m, r)
+      }
+      response <- AuthorizeRoutes
+        .routes[IO](failingPayments, f.methods, spyGateway, NoOpLogger[IO])
+        .orNotFound
+        .run(
+          Request[IO](Method.POST, uri"/payments/authorize")
+            .withEntity(AuthorizePaymentRequest("order-1", 4999, f.approveId))
+        )
+        .attempt
+      released <- voided.get
+    } yield {
+      assert(response.fold(_ => true, _.status.code >= 500), response)
+      assertEquals(released.size, 1)
+      assert(released.head.startsWith("auth_"))
     }
   }
 }

@@ -65,8 +65,8 @@ object PaymentStore {
   private val eventSource = "payment-service"
 
   /** Envelope for `PaymentAuthorized` (ADR 0009), keyed and correlated by
-    * `orderId` - the same choice order-service makes for its own events.
-    * Built once here for both interpreters.
+    * `orderId` - the same choice order-service makes for its own events. Built
+    * once here for both interpreters.
     */
   private def authorizedEnvelope[F[_]: Sync](
       orderId: String,
