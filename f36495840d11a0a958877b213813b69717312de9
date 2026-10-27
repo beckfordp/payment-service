@@ -1,0 +1,1 @@
+Phase 2 'Payment methods' verification. Automated: sbt coverage test coverageReport -> 120/120 passed. Manual (/prompt off): scripts/verify-payment-methods.sh live: POST /payments/methods 201 {id,last4,brand,expiry}, row has tok_visa_4242 + billing JSONB, PAN absent from pg_dump, service log, response; invalid card/expired/bad country -> 400; CORS preflight OK. All passed.
