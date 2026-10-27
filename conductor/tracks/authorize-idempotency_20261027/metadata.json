@@ -1,0 +1,8 @@
+{
+  "track_id": "authorize-idempotency_20261027",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-10-27T21:01:27Z",
+  "updated_at": "2026-10-27T21:01:27Z",
+  "description": "TD-10.1 — idempotent POST /payments/authorize: replay by orderId, 409 on amount or payment-method mismatch, backed by a unique constraint (supersedes US-6.2)"
+}
