@@ -133,7 +133,7 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
   }
 
   test(
-    "running migrations' CHECK constraint still allows the three valid statuses"
+    "running migrations' CHECK constraint still allows the four valid statuses"
   ) {
     withContainers { postgres =>
       val config = PostgresConfig(
@@ -152,7 +152,7 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
         )
         try {
           val stmt = conn.createStatement()
-          List("pending", "settled", "failed").foreach { status =>
+          List("pending", "authorized", "settled", "failed").foreach { status =>
             stmt.executeUpdate(
               "insert into \"payment\" (id, order_id, amount_cents, status) " +
                 s"values (gen_random_uuid(), 'order-1', 100, '$status')"

@@ -11,6 +11,13 @@ class PaymentStatusSuite extends CatsEffectSuite {
     )
   }
 
+  test("fromString parses \"authorized\" as Authorized") {
+    assertEquals(
+      PaymentStatus.fromString("authorized"),
+      Right(PaymentStatus.Authorized)
+    )
+  }
+
   test("fromString parses \"settled\" as Settled") {
     assertEquals(
       PaymentStatus.fromString("settled"),
@@ -30,9 +37,13 @@ class PaymentStatusSuite extends CatsEffectSuite {
   }
 
   test("asString round-trips through fromString for every status") {
-    List(PaymentStatus.Pending, PaymentStatus.Settled, PaymentStatus.Failed)
-      .foreach { status =>
-        assertEquals(PaymentStatus.fromString(status.asString), Right(status))
-      }
+    List(
+      PaymentStatus.Pending,
+      PaymentStatus.Authorized,
+      PaymentStatus.Settled,
+      PaymentStatus.Failed
+    ).foreach { status =>
+      assertEquals(PaymentStatus.fromString(status.asString), Right(status))
+    }
   }
 }
