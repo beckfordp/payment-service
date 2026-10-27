@@ -1,0 +1,1 @@
+Task: Card validation + simulated tokenizer (US-13.1). Card.validate: 13-19 digits (spaces stripped), Luhn, MM/YY not before current month (injected YearMonth); CardBrand prefix rules incl. 2221-2720 mastercard; token tok_<brand>_<last4>. PAN dropped at validation. Files: Card.scala, CardSuite.scala.
