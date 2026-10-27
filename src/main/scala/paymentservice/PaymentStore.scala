@@ -4,7 +4,6 @@ import cats.effect.{Async, Ref, Resource, Sync}
 import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
-import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.Meter
 import skunk.{Codec, Session}
 import skunk.codec.all._
@@ -12,7 +11,6 @@ import skunk.implicits._
 
 import java.time.OffsetDateTime
 import java.util.UUID
-import scala.concurrent.duration.SECONDS
 
 final case class Payment(
     id: String,
@@ -141,36 +139,10 @@ object PaymentStore {
       .withDatabase(config.database)
       .pooled(max = 10)
       .evalMap { pool =>
-        meter
-          .histogram[Double]("db.client.operation.duration")
-          .withUnit("s")
-          .create
-          .map { histogram =>
-            /** Times a Skunk query, recording a `db.client.operation.duration`
-              * measurement tagged with `db.system`/`db.operation` (OTel
-              * semantic-convention names), plus `error.type` if it fails - this
-              * is this service's only Postgres consumer, so it's instrumented
-              * directly here rather than via a new purerest combinator.
-              */
-            def timed[A](operation: String)(fa: F[A]): F[A] =
-              for {
-                start <- Async[F].monotonic
-                result <- fa.attempt
-                end <- Async[F].monotonic
-                outcomeAttributes = result match {
-                  case Right(_)    => Nil
-                  case Left(error) =>
-                    List(Attribute("error.type", error.getClass.getName))
-                }
-                _ <- histogram.record(
-                  (end - start).toUnit(SECONDS),
-                  List(
-                    Attribute("db.system", "postgresql"),
-                    Attribute("db.operation", operation)
-                  ) ++ outcomeAttributes
-                )
-                a <- result.liftTo[F]
-              } yield a
+        DbTimer
+          .create(meter)
+          .map { timer =>
+            import timer.timed
 
             new PaymentStore[F] {
               def create(orderId: String, amountCents: Int): F[Payment] =
