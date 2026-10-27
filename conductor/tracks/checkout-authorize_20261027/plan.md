@@ -19,8 +19,8 @@
 - [x] Task: `POST /payments/authorize` — failing route tests (200 `{authId,expiresAt}`, 402 `{error,reason}`, 404 unknown method, 400 non-positive amount/blank orderId) (Red); endpoint orchestrating method lookup → gateway → store, wired in `Main` (Green) `920f139`
 - [x] Task: CORS allowed methods check/update; `CorsSuite` green — no change needed: POST already allowed; `/payments/methods` preflight proven live in Phase 2; `/payments/authorize` is server-to-server
 - [x] Task: Full `sbt test` + coverage — 133/133; AuthorizeRoutes 93%/80%, PaymentStore ~100% (overall 91.87%/94.00%)
-- [ ] Task: `scripts/verify-checkout-authorize.sh` — real Postgres + `sbt run`: create method (4242… approve), authorize → 200 + outbox row; create method ending 0002 visa (decline token) → 402, no new outbox row; unknown method → 404; trap cleanup. Run for real
-- [ ] Task: Conductor - User Manual Verification 'Authorize' (Protocol in workflow.md)
+- [x] Task: `scripts/verify-checkout-authorize.sh` — real Postgres + `sbt run`: create method (4242… approve), authorize → 200 + outbox row; create method ending 0002 visa (decline token) → 402, no new outbox row; unknown method → 404; trap cleanup. Run for real `b55c1f8`
+- [x] Task: Conductor - User Manual Verification 'Authorize' (Protocol in workflow.md) — `/prompt off`: ran `scripts/verify-checkout-authorize.sh` live (200 + Authorized row + 1 outbox row; 402 insufficient_funds + Failed row, no outbox; 404; 400) — all passed `b55c1f8`
 
 ## Phase 4: Docs sync
 - [ ] Task: Diff `/docs` OpenAPI vs `gluon/docs/system-design.md` REST contracts; fix drift (gluon commit separate)
