@@ -11,8 +11,8 @@
 ## Phase 2: Payment methods (US-13.1, US-13.2)
 - [x] Task: `PaymentMethodStore[F]` — failing `PaymentMethodStoreSuite` (inMemory create/get) + `PaymentMethodStorePostgresSuite` (round-trip, billing JSONB, schema has no PAN column) (Red); `V5__create_payment_methods.sql`, `inMemory`/`postgres` with `timed` telemetry (Green) `a1315b9`
 - [x] Task: `POST /payments/methods` — failing route tests (201 body `{id,last4,brand,expiry}`, no token in body, 400 per invalid card/expiry/address/blank customerId) (Red); tapir endpoint in new `PaymentMethodRoutes` (deviation: own object, not `PaymentRoutes` — keeps generated CRUD file untouched), wire store in `Main`/`AppRoutes`, docs suite updated (Green) `f682964`
-- [ ] Task: Full `sbt test` + coverage
-- [ ] Task: Conductor - User Manual Verification 'Payment methods' (Protocol in workflow.md)
+- [x] Task: Full `sbt test` + coverage — 120/120; new files 96–100% stmt (overall 90.93%/95.51%)
+- [x] Task: Conductor - User Manual Verification 'Payment methods' (Protocol in workflow.md) — `/prompt off`: ran `scripts/verify-payment-methods.sh` live (201 + token stored, PAN absent from pg_dump/log/response, 3×400, CORS preflight) — all passed `c5c673f`
 
 ## Phase 3: Authorize (US-14.1)
 - [ ] Task: Outbox writer + authorize persistence — failing `PaymentStoreSuite`/`PaymentStorePostgresSuite` (`authorize` writes Authorized payment w/ method/authId/expiresAt + `PaymentAuthorized` envelope outbox row in one tx; `decline` writes Failed payment w/ reason, no outbox row; rollback leaves neither) (Red); `V6__add_authorization_columns.sql`, `PendingOutboxEvent` mirroring order-service, `inMemoryWithOutbox` (Green)
