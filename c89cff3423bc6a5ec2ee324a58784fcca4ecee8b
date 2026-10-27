@@ -1,0 +1,1 @@
+Review fixes: scalafmtAll (11 files, CI was red since fd8c87f); PaymentMethodError ADT for /payments/methods 400 (guideline: errors mapped 1:1 from domain ADT); Card accepts ASCII digits only (+test); AuthorizeRoutes voids gateway hold if recordAuthorization fails (+test). 137/137, scalafmtCheckAll clean.
