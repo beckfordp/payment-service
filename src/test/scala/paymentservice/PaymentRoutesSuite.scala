@@ -28,6 +28,18 @@ class PaymentRoutesSuite extends CatsEffectSuite {
         IO.raiseError(error)
       def delete(id: String): IO[Boolean] = IO.raiseError(error)
       def ping: IO[Boolean] = IO.raiseError(error)
+      def recordAuthorization(
+          orderId: String,
+          amountCents: Int,
+          paymentMethodId: String,
+          authorization: Authorization
+      ): IO[Payment] = IO.raiseError(new NotImplementedError)
+      def recordDecline(
+          orderId: String,
+          amountCents: Int,
+          paymentMethodId: String,
+          reason: DeclineReason
+      ): IO[Payment] = IO.raiseError(new NotImplementedError)
     }
 
   test("POST /payments returns 201 with the created entity") {

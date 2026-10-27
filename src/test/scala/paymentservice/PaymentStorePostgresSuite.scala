@@ -10,6 +10,7 @@ import org.typelevel.otel4s.metrics.Meter
 import purerest.metrics.Metrics
 
 import java.sql.DriverManager
+import java.time.Instant
 import scala.jdk.CollectionConverters._
 
 class PaymentStorePostgresSuite
@@ -446,6 +447,154 @@ class PaymentStorePostgresSuite
             assertEquals(read3, None)
           }
         }
+    }
+  }
+
+  private val authorization =
+    Authorization("auth_pg", Instant.parse("2026-11-03T12:00:00Z"))
+
+  private def withStores[A](postgres: PostgreSQLContainer)(
+      f: (PaymentStore[IO], PaymentMethod) => IO[A]
+  ): IO[A] = {
+    val config = configFor(postgres)
+    Migrations.run[IO](config) *> (
+      PaymentStore.postgres[IO](config, Meter.noop[IO]),
+      PaymentMethodStore.postgres[IO](config, Meter.noop[IO])
+    ).tupled.use { case (store, methods) =>
+      methods
+        .create(
+          "customer-1",
+          Card("4242", CardBrand.Visa, "12/99"),
+          Address("1 High St", None, "London", "SW1A 1AA", "GB")
+        )
+        .flatMap(method => f(store, method))
+    }
+  }
+
+  private def query(postgres: PostgreSQLContainer, sql: String): List[String] = {
+    val conn = DriverManager.getConnection(
+      postgres.jdbcUrl,
+      postgres.username,
+      postgres.password
+    )
+    try {
+      val rs = conn.createStatement().executeQuery(sql)
+      Iterator
+        .unfold(())(_ => if (rs.next()) Some((rs.getString(1), ())) else None)
+        .toList
+    } finally conn.close()
+  }
+
+  test(
+    "recordAuthorization persists an Authorized payment and its PaymentAuthorized outbox row"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          payment <- store.recordAuthorization(
+            orderId,
+            4999,
+            method.id,
+            authorization
+          )
+          found <- store.get(payment.id)
+        } yield {
+          assertEquals(payment.status, PaymentStatus.Authorized)
+          assertEquals(payment.paymentMethodId, Some(method.id))
+          assertEquals(payment.authId, Some("auth_pg"))
+          assertEquals(payment.expiresAt, Some(authorization.expiresAt))
+          assertEquals(found, Some(payment))
+          assertEquals(
+            query(
+              postgres,
+              s"select aggregate_id || '|' || correlation_id || '|' || (payload->>'eventType') || '|' || (payload->>'source') || '|' || (payload->'payload'->>'authId') || '|' || (payload->'payload'->>'orderId') from outbox_events where aggregate_id = '$orderId'"
+            ),
+            List(
+              s"$orderId|$orderId|PaymentAuthorized|payment-service|auth_pg|$orderId"
+            )
+          )
+        }
+      }
+    }
+  }
+
+  test("recordDecline persists a Failed payment and writes no outbox row") {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          payment <- store.recordDecline(
+            orderId,
+            4999,
+            method.id,
+            DeclineReason("insufficient_funds")
+          )
+          found <- store.get(payment.id)
+        } yield {
+          assertEquals(payment.status, PaymentStatus.Failed)
+          assertEquals(payment.declineReason, Some("insufficient_funds"))
+          assertEquals(found, Some(payment))
+          assertEquals(
+            query(
+              postgres,
+              s"select id from outbox_events where aggregate_id = '$orderId'"
+            ),
+            Nil
+          )
+        }
+      }
+    }
+  }
+
+  test(
+    "recordAuthorization rolls back the payment row when the outbox write fails"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          // Break only the outbox insert: a CHECK no envelope can satisfy.
+          _ <- IO.blocking {
+            val conn = DriverManager.getConnection(
+              postgres.jdbcUrl,
+              postgres.username,
+              postgres.password
+            )
+            try
+              conn
+                .createStatement()
+                .execute(
+                  "alter table outbox_events add constraint reject_all check (false) not valid"
+                )
+            finally conn.close()
+          }
+          result <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .attempt
+          _ <- IO.blocking {
+            val conn = DriverManager.getConnection(
+              postgres.jdbcUrl,
+              postgres.username,
+              postgres.password
+            )
+            try
+              conn
+                .createStatement()
+                .execute("alter table outbox_events drop constraint reject_all")
+            finally conn.close()
+          }
+        } yield {
+          assert(result.isLeft)
+          assertEquals(
+            query(
+              postgres,
+              s"select id from payment where order_id = '$orderId'"
+            ),
+            Nil
+          )
+        }
+      }
     }
   }
 }

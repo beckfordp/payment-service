@@ -3,6 +3,8 @@ package paymentservice
 import cats.effect.IO
 import munit.CatsEffectSuite
 
+import java.time.Instant
+
 class PaymentStoreSuite extends CatsEffectSuite {
 
   test("create returns a persisted entity with a generated id") {
@@ -77,5 +79,55 @@ class PaymentStoreSuite extends CatsEffectSuite {
       store <- PaymentStore.inMemory[IO]
       deleted <- store.delete("unknown-id")
     } yield assert(!deleted)
+  }
+
+  private val authorization =
+    Authorization("auth_1", Instant.parse("2026-11-03T12:00:00Z"))
+
+  test("recordAuthorization stores an Authorized payment and one outbox event") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      payment <- store.recordAuthorization("order-1", 4999, "pm-1", authorization)
+      found <- store.get(payment.id)
+      events <- outbox.get
+    } yield {
+      assertEquals(payment.status, PaymentStatus.Authorized)
+      assertEquals(payment.paymentMethodId, Some("pm-1"))
+      assertEquals(payment.authId, Some("auth_1"))
+      assertEquals(payment.expiresAt, Some(authorization.expiresAt))
+      assertEquals(payment.declineReason, None)
+      assertEquals(found, Some(payment))
+      assertEquals(events.size, 1)
+      val (aggregateId, envelope) = events.head
+      assertEquals(aggregateId, "order-1")
+      assertEquals(envelope.eventType, "PaymentAuthorized")
+      assertEquals(envelope.source, "payment-service")
+      assertEquals(envelope.correlationId, "order-1")
+      val event = envelope.payload.as[PaymentAuthorizedEvent].toOption.get
+      assertEquals(event.orderId, "order-1")
+      assertEquals(event.authId, "auth_1")
+      assertEquals(event.expiresAt, authorization.expiresAt)
+    }
+  }
+
+  test("recordDecline stores a Failed payment with its reason and no outbox event") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      payment <- store.recordDecline(
+        "order-1",
+        4999,
+        "pm-1",
+        DeclineReason("insufficient_funds")
+      )
+      found <- store.get(payment.id)
+      events <- outbox.get
+    } yield {
+      assertEquals(payment.status, PaymentStatus.Failed)
+      assertEquals(payment.paymentMethodId, Some("pm-1"))
+      assertEquals(payment.declineReason, Some("insufficient_funds"))
+      assertEquals(payment.authId, None)
+      assertEquals(found, Some(payment))
+      assertEquals(events, Nil)
+    }
   }
 }

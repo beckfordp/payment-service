@@ -18,6 +18,18 @@ class HealthRoutesSuite extends CatsEffectSuite {
       ): IO[Option[Payment]] = IO.pure(None)
       def delete(id: String): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
+      def recordAuthorization(
+          orderId: String,
+          amountCents: Int,
+          paymentMethodId: String,
+          authorization: Authorization
+      ): IO[Payment] = IO.raiseError(new NotImplementedError)
+      def recordDecline(
+          orderId: String,
+          amountCents: Int,
+          paymentMethodId: String,
+          reason: DeclineReason
+      ): IO[Payment] = IO.raiseError(new NotImplementedError)
     }
 
   private val notReadyStore: PaymentStore[IO] =
@@ -31,6 +43,18 @@ class HealthRoutesSuite extends CatsEffectSuite {
       ): IO[Option[Payment]] = IO.pure(None)
       def delete(id: String): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)
+      def recordAuthorization(
+          orderId: String,
+          amountCents: Int,
+          paymentMethodId: String,
+          authorization: Authorization
+      ): IO[Payment] = IO.raiseError(new NotImplementedError)
+      def recordDecline(
+          orderId: String,
+          amountCents: Int,
+          paymentMethodId: String,
+          reason: DeclineReason
+      ): IO[Payment] = IO.raiseError(new NotImplementedError)
     }
 
   test("GET /health returns 200") {

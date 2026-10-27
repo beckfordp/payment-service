@@ -50,7 +50,11 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
               "amount_cents",
               "status",
               "created_at",
-              "updated_at"
+              "updated_at",
+              "payment_method_id",
+              "auth_id",
+              "expires_at",
+              "decline_reason"
             )
           )
         } finally conn.close()
