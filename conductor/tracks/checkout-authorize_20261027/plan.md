@@ -1,6 +1,6 @@
 # Plan: Checkout Journey 1 payment-service — gateway, payment methods, authorize
 
-## Phase 1: Domain foundations
+## Phase 1: Domain foundations [checkpoint: 025ca53]
 - [x] Task: `PaymentStatus.Authorized` — failing `PaymentStatusSuite`/`MigrationsSuite` cases (Red); add case + `V4__add_authorized_status.sql` widening `payment_status_check`; Settled doc comment → "captured" (Green) `0b0e98f`
 - [x] Task: `Address` + validation (US-12.1) — failing `AddressSuite` (blank line1/city/postalCode, bad country, optional line2) (Red); implement `Address` + circe/tapir codecs + `validate` (Green) `fd8c87f`
 - [x] Task: Card validation + simulated tokenizer — failing `CardSuite` (Luhn, 13–19 digits, spaces stripped, brand prefixes incl. 2221–2720, MM/YY bad month/past expiry with injected clock, `tok_<brand>_<last4>`) (Red); implement `Card` (Green) `f149a17`
