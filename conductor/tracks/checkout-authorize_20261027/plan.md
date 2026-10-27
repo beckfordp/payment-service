@@ -15,7 +15,7 @@
 - [x] Task: Conductor - User Manual Verification 'Payment methods' (Protocol in workflow.md) — `/prompt off`: ran `scripts/verify-payment-methods.sh` live (201 + token stored, PAN absent from pg_dump/log/response, 3×400, CORS preflight) — all passed `c5c673f`
 
 ## Phase 3: Authorize (US-14.1)
-- [ ] Task: Outbox writer + authorize persistence — failing `PaymentStoreSuite`/`PaymentStorePostgresSuite` (`authorize` writes Authorized payment w/ method/authId/expiresAt + `PaymentAuthorized` envelope outbox row in one tx; `decline` writes Failed payment w/ reason, no outbox row; rollback leaves neither) (Red); `V6__add_authorization_columns.sql`, `PendingOutboxEvent` mirroring order-service, `inMemoryWithOutbox` (Green)
+- [x] Task: Outbox writer + authorize persistence — failing `PaymentStoreSuite`/`PaymentStorePostgresSuite` (`authorize` writes Authorized payment w/ method/authId/expiresAt + `PaymentAuthorized` envelope outbox row in one tx; `decline` writes Failed payment w/ reason, no outbox row; rollback leaves neither) (Red); `V6__add_authorization_columns.sql`, `PendingOutboxEvent` mirroring order-service, `inMemoryWithOutbox` (Green) — deviation: explicit `recordAuthorization`/`recordDecline` store methods instead of a generic `PendingOutboxEvent` (only one producer, all fields known up front; generalise when Journey 4/5 add more) `7b9ad80`
 - [ ] Task: `POST /payments/authorize` — failing route tests (200 `{authId,expiresAt}`, 402 `{error,reason}`, 404 unknown method, 400 non-positive amount/blank orderId) (Red); endpoint orchestrating method lookup → gateway → store, wired in `Main` (Green)
 - [ ] Task: CORS allowed methods check/update; `CorsSuite` green
 - [ ] Task: Full `sbt test` + coverage
