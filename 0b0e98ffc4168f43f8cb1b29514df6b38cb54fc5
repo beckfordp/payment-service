@@ -1,0 +1,1 @@
+Task: PaymentStatus.Authorized. Added Authorized case (ADR 0011 authorize/capture split; Settled now = captured) + V4 migration widening payment_status_check. Files: PaymentStatus.scala, V4__add_authorized_status.sql, PaymentStatusSuite, MigrationsSuite.
