@@ -28,6 +28,10 @@
 - [x] Task: Rebuild/redeploy payment-service; `scripts/verify-capture.sh` — success path (captured + one `PaymentCaptured` row), duplicate injection harmless, capture-decline token (`failed` + `PaymentFailed {reason: capture_failed}`); cleanup `c774b79`
 - [x] Task: Conductor - User Manual Verification 'AsyncAPI, registry, live proof, docs' (Protocol in workflow.md) `c774b79`
 
+## Phase: Review Fixes
+
+- [x] Task: Apply review suggestions `99b9117`
+
 ## Risks / notes
 
 - Crash between the gateway capture and the DB write can double-capture on
