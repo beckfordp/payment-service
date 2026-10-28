@@ -1,0 +1,8 @@
+{
+  "track_id": "capture-on-dispatch_20261028",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-10-28T19:41:29Z",
+  "updated_at": "2026-10-28T19:41:29Z",
+  "description": "US-19.1 — consume fulfilment-events DispatchConfirmed, capture the held authorization, publish PaymentCaptured/PaymentFailed"
+}
