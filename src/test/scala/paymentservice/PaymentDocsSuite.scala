@@ -61,6 +61,8 @@ class PaymentDocsSuite extends CatsEffectSuite {
         SimulatedGatewayConfig(
           GatewayOutcome.Approve,
           Map.empty,
+          GatewayOutcome.Approve,
+          Map.empty,
           scala.concurrent.duration.Duration(1, "day")
         )
       )

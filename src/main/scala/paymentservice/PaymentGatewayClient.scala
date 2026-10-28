@@ -13,15 +13,21 @@ final case class DeclineReason(value: String)
 final case class Authorization(authId: String, expiresAt: Instant)
 
 /** ADR 0011's provider seam. Only `simulated` exists - a real provider (Stripe
-  * or otherwise) is a future ADR's decision. `capture`/`void` have no callers
-  * until Checkout Journeys 3/4.
+  * or otherwise) is a future ADR's decision. `void` is used by US-18.2's
+  * dispatch-failed path and `capture` by US-19.1's capture-on-dispatch; a
+  * capture decline is returned as a value so it never retries through the DLQ.
+  * `cardToken` is only consulted by the simulator (per-test-card capture
+  * outcomes); a real provider captures by `authId` alone.
   */
 trait PaymentGatewayClient[F[_]] {
   def authorize(
       cardToken: String,
       amountCents: Int
   ): F[Either[DeclineReason, Authorization]]
-  def capture(authId: String): F[Unit]
+  def capture(
+      authId: String,
+      cardToken: String
+  ): F[Either[DeclineReason, Unit]]
   def void(authId: String): F[Unit]
 }
 
@@ -53,10 +59,14 @@ object GatewayOutcome {
 /** `payment-gateway.simulated` - outcome keyed by simulated card token
   * (`tok_<brand>_<last4>`), same convention as real gateways' test-card
   * sandboxes (`gluon/docs/system-design.md`, "Local payment simulation").
+  * `captureOutcomes`/`defaultCaptureOutcome` are the capture-time equivalent: a
+  * token can authorize successfully yet decline when captured (US-19.1).
   */
 final case class SimulatedGatewayConfig(
     defaultOutcome: GatewayOutcome,
     outcomes: Map[String, GatewayOutcome],
+    defaultCaptureOutcome: GatewayOutcome,
+    captureOutcomes: Map[String, GatewayOutcome],
     authorizationTtl: FiniteDuration
 ) derives ConfigReader
 
@@ -86,7 +96,17 @@ object PaymentGatewayClient {
             ).asRight[DeclineReason]
         }
 
-      def capture(authId: String): F[Unit] = Sync[F].unit
+      def capture(
+          authId: String,
+          cardToken: String
+      ): F[Either[DeclineReason, Unit]] =
+        config.captureOutcomes
+          .getOrElse(cardToken, config.defaultCaptureOutcome) match {
+          case GatewayOutcome.Decline(reason) =>
+            DeclineReason(reason).asLeft[Unit].pure[F]
+          case GatewayOutcome.Approve =>
+            ().asRight[DeclineReason].pure[F]
+        }
 
       def void(authId: String): F[Unit] = Sync[F].unit
     }

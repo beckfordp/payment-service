@@ -40,6 +40,7 @@ object Main extends IOApp.Simple {
     _ <- KafkaConsumers.resource[IO](
       config.kafka,
       store,
+      methods,
       gateway,
       telemetry.logger,
       telemetry.meter

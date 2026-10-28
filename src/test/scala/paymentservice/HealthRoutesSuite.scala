@@ -32,6 +32,12 @@ class HealthRoutesSuite extends CatsEffectSuite {
           paymentMethodId: String,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
+      def recordCapture(orderId: String): IO[Option[Payment]] =
+        IO.raiseError(new NotImplementedError)
+      def recordCaptureFailure(
+          orderId: String,
+          reason: String
+      ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
     }
 
   private val notReadyStore: PaymentStore[IO] =
@@ -58,6 +64,12 @@ class HealthRoutesSuite extends CatsEffectSuite {
           amountCents: Int,
           paymentMethodId: String,
           reason: DeclineReason
+      ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
+      def recordCapture(orderId: String): IO[Option[Payment]] =
+        IO.raiseError(new NotImplementedError)
+      def recordCaptureFailure(
+          orderId: String,
+          reason: String
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
     }
 

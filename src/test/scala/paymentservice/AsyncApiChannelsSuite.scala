@@ -18,7 +18,7 @@ class AsyncApiChannelsSuite extends FunSuite {
   private val sampleInstant = Instant.parse("2026-10-26T00:00:00Z")
 
   test(
-    "AsyncApiChannels.channels registers the four payment-events contracts and the consumed DispatchFailed"
+    "AsyncApiChannels.channels registers the four payment-events contracts and both consumed fulfilment events"
   ) {
     assertEquals(
       AsyncApiChannels.channels.map(c => c.topic -> c.eventType).toSet,
@@ -27,24 +27,32 @@ class AsyncApiChannelsSuite extends FunSuite {
         "payment-events" -> "PaymentCaptured",
         "payment-events" -> "PaymentAuthorizationExpired",
         "payment-events" -> "PaymentFailed",
-        "fulfilment-events" -> "DispatchFailed"
+        "fulfilment-events" -> "DispatchFailed",
+        "fulfilment-events" -> "DispatchConfirmed"
       )
     )
   }
 
   test(
-    "payment-events contracts are Publish(Cdc); DispatchFailed is Subscribe-only"
+    "payment-events contracts are Publish(Cdc); fulfilment-events contracts are Subscribe-only"
   ) {
-    for (channel <- AsyncApiChannels.channels.filter(_.topic == "payment-events"))
+    for (
+      channel <- AsyncApiChannels.channels.filter(_.topic == "payment-events")
+    )
       assertEquals(
         channel.direction,
         ChannelDirection.Publish(PublisherKind.Cdc): ChannelDirection,
         s"expected ${channel.eventType} to be Publish(Cdc)"
       )
 
-    val consumed =
-      AsyncApiChannels.channels.find(_.eventType == "DispatchFailed").get
-    assertEquals(consumed.direction, ChannelDirection.Subscribe: ChannelDirection)
+    for (
+      eventType <- List("DispatchFailed", "DispatchConfirmed");
+      consumed <- AsyncApiChannels.channels.find(_.eventType == eventType)
+    )
+      assertEquals(
+        consumed.direction,
+        ChannelDirection.Subscribe: ChannelDirection
+      )
   }
 
   test("the retired PaymentSettled and OrderReserved event types are gone") {
@@ -76,6 +84,11 @@ class AsyncApiChannelsSuite extends FunSuite {
       reason = "capture_failed",
       timestamp = sampleInstant
     )
+    val confirmed = DispatchConfirmedEvent(
+      orderId = "o-1",
+      trackingNo = "TRACK-1",
+      items = List(FulfilmentItem("sku-1", "Widget", 1, 4999))
+    )
 
     def keysOf(value: io.circe.Json): Set[String] =
       value.asObject.map(_.keys.toSet).getOrElse(Set.empty)
@@ -95,6 +108,10 @@ class AsyncApiChannelsSuite extends FunSuite {
     assertEquals(
       keysOf(failed.asJson),
       Set("orderId", "paymentId", "amountCents", "reason", "timestamp")
+    )
+    assertEquals(
+      keysOf(confirmed.asJson),
+      Set("orderId", "trackingNo", "items")
     )
   }
 

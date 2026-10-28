@@ -37,9 +37,8 @@ class PaymentStorePostgresSuite
       Migrations.run[IO](config) *> PaymentStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
-          store.create("order-create", 4999).map {
-            entity =>
-              assert(entity.id.nonEmpty)
+          store.create("order-create", 4999).map { entity =>
+            assert(entity.id.nonEmpty)
           }
         }
     }
@@ -169,7 +168,7 @@ class PaymentStorePostgresSuite
   }
 
   test(
-    "update to Captured writes no outbox row (no event until the authorize/capture producers land)"
+    "update to Captured writes no outbox row (only recordCapture emits PaymentCaptured)"
   ) {
     withContainers { postgres =>
       val config = configFor(postgres)
@@ -657,6 +656,172 @@ class PaymentStorePostgresSuite
               s"select id from outbox_events where aggregate_id = '$orderId'"
             ).size,
             1
+          )
+        }
+      }
+    }
+  }
+
+  test(
+    "recordCapture transitions Authorized to Captured and writes its PaymentCaptured outbox row"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
+          captured <- store
+            .recordCapture(orderId)
+            .map(_.getOrElse(fail("expected the capture to be recorded")))
+          found <- store.findByOrderId(orderId)
+        } yield {
+          assertEquals(captured.status, PaymentStatus.Captured)
+          assertEquals(found.map(_.status), Some(PaymentStatus.Captured))
+          assertEquals(
+            query(
+              postgres,
+              s"select aggregate_id || '|' || correlation_id || '|' || (payload->>'eventType') || '|' || (payload->>'source') || '|' || (payload->'payload'->>'orderId') || '|' || (payload->'payload'->>'amountCents') from outbox_events where aggregate_id = '$orderId' and payload->>'eventType' = 'PaymentCaptured'"
+            ),
+            List(
+              s"$orderId|$orderId|PaymentCaptured|payment-service|$orderId|4999"
+            )
+          )
+        }
+      }
+    }
+  }
+
+  test(
+    "a repeated recordCapture returns None and leaves exactly one PaymentCaptured outbox row"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
+          _ <- store
+            .recordCapture(orderId)
+            .map(_.getOrElse(fail("expected the first capture")))
+          second <- store.recordCapture(orderId)
+        } yield {
+          assertEquals(second, None)
+          assertEquals(
+            query(
+              postgres,
+              s"select id from outbox_events where aggregate_id = '$orderId' and payload->>'eventType' = 'PaymentCaptured'"
+            ).size,
+            1
+          )
+        }
+      }
+    }
+  }
+
+  test("recordCapture returns None for a non-authorized payment") {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      val config = configFor(postgres)
+      Migrations.run[IO](config) *> PaymentStore
+        .postgres[IO](config, Meter.noop[IO])
+        .use { store =>
+          for {
+            _ <- store.create(orderId, 4999)
+            result <- store.recordCapture(orderId)
+          } yield {
+            assertEquals(result, None)
+            assertEquals(
+              query(
+                postgres,
+                s"select id from outbox_events where aggregate_id = '$orderId'"
+              ),
+              Nil
+            )
+          }
+        }
+    }
+  }
+
+  test(
+    "recordCaptureFailure marks the payment Failed and writes its PaymentFailed outbox row"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          authorized <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
+          failed <- store
+            .recordCaptureFailure(orderId, "capture_failed")
+            .map(
+              _.getOrElse(fail("expected the capture failure to be recorded"))
+            )
+        } yield {
+          assertEquals(failed.id, authorized.id)
+          assertEquals(failed.status, PaymentStatus.Failed)
+          assertEquals(failed.declineReason, Some("capture_failed"))
+          assertEquals(
+            query(
+              postgres,
+              s"select (payload->'payload'->>'paymentId') || '|' || (payload->'payload'->>'amountCents') || '|' || (payload->'payload'->>'reason') || '|' || (payload->>'eventType') from outbox_events where aggregate_id = '$orderId' and payload->>'eventType' = 'PaymentFailed'"
+            ),
+            List(s"${failed.id}|4999|capture_failed|PaymentFailed")
+          )
+        }
+      }
+    }
+  }
+
+  test(
+    "recordCapture rolls back the status change when the outbox write fails"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
+          // Break only the outbox insert: a CHECK no envelope can satisfy.
+          _ <- IO.blocking {
+            val conn = DriverManager.getConnection(
+              postgres.jdbcUrl,
+              postgres.username,
+              postgres.password
+            )
+            try
+              conn
+                .createStatement()
+                .execute(
+                  "alter table outbox_events add constraint reject_all check (false) not valid"
+                )
+            finally conn.close()
+          }
+          result <- store.recordCapture(orderId).attempt
+          _ <- IO.blocking {
+            val conn = DriverManager.getConnection(
+              postgres.jdbcUrl,
+              postgres.username,
+              postgres.password
+            )
+            try
+              conn
+                .createStatement()
+                .execute("alter table outbox_events drop constraint reject_all")
+            finally conn.close()
+          }
+        } yield {
+          assert(result.isLeft)
+          assertEquals(
+            query(
+              postgres,
+              s"select status from payment where order_id = '$orderId'"
+            ),
+            List("authorized")
           )
         }
       }

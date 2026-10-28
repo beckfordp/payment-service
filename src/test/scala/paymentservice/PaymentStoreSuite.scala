@@ -200,4 +200,113 @@ class PaymentStoreSuite extends CatsEffectSuite {
       assertEquals(events, Nil)
     }
   }
+
+  private def authorizedPayment(store: PaymentStore[IO]): IO[Payment] =
+    store
+      .recordAuthorization("order-1", 4999, "pm-1", authorization)
+      .map(_.getOrElse(fail("expected the authorization to be inserted")))
+
+  test(
+    "recordCapture marks an Authorized payment Captured and emits PaymentCaptured"
+  ) {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      authorized <- authorizedPayment(store)
+      captured <- store
+        .recordCapture("order-1")
+        .map(_.getOrElse(fail("expected the capture to be recorded")))
+      events <- outbox.get
+    } yield {
+      assertEquals(captured.id, authorized.id)
+      assertEquals(captured.status, PaymentStatus.Captured)
+      assertEquals(captured.declineReason, None)
+      assertEquals(events.size, 2)
+      val (aggregateId, envelope) = events.last
+      assertEquals(aggregateId, "order-1")
+      assertEquals(envelope.eventType, "PaymentCaptured")
+      assertEquals(envelope.source, "payment-service")
+      assertEquals(envelope.correlationId, "order-1")
+      val event = envelope.payload.as[PaymentCapturedEvent].toOption.get
+      assertEquals(event.orderId, "order-1")
+      assertEquals(event.amountCents, 4999)
+    }
+  }
+
+  test("a second recordCapture returns None and adds no outbox row") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- authorizedPayment(store)
+      _ <- store
+        .recordCapture("order-1")
+        .map(_.getOrElse(fail("expected the first capture")))
+      second <- store.recordCapture("order-1")
+      events <- outbox.get
+    } yield {
+      assertEquals(second, None)
+      assertEquals(events.size, 2)
+    }
+  }
+
+  test("recordCapture returns None for an unknown order") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      result <- store.recordCapture("order-unknown")
+      events <- outbox.get
+    } yield {
+      assertEquals(result, None)
+      assertEquals(events, Nil)
+    }
+  }
+
+  test("recordCapture returns None for a non-authorized payment") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- store.create("order-1", 4999)
+      result <- store.recordCapture("order-1")
+      events <- outbox.get
+    } yield {
+      assertEquals(result, None)
+      assertEquals(events, Nil)
+    }
+  }
+
+  test(
+    "recordCaptureFailure marks an Authorized payment Failed and emits PaymentFailed"
+  ) {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      authorized <- authorizedPayment(store)
+      failed <- store
+        .recordCaptureFailure("order-1", "capture_failed")
+        .map(_.getOrElse(fail("expected the capture failure to be recorded")))
+      events <- outbox.get
+    } yield {
+      assertEquals(failed.id, authorized.id)
+      assertEquals(failed.status, PaymentStatus.Failed)
+      assertEquals(failed.declineReason, Some("capture_failed"))
+      assertEquals(events.size, 2)
+      val (aggregateId, envelope) = events.last
+      assertEquals(aggregateId, "order-1")
+      assertEquals(envelope.eventType, "PaymentFailed")
+      assertEquals(envelope.source, "payment-service")
+      assertEquals(envelope.correlationId, "order-1")
+      val event = envelope.payload.as[PaymentFailedEvent].toOption.get
+      assertEquals(event.orderId, "order-1")
+      assertEquals(event.paymentId, failed.id)
+      assertEquals(event.amountCents, 4999)
+      assertEquals(event.reason, "capture_failed")
+    }
+  }
+
+  test("recordCaptureFailure returns None for a non-authorized payment") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- store.create("order-1", 4999)
+      result <- store.recordCaptureFailure("order-1", "capture_failed")
+      events <- outbox.get
+    } yield {
+      assertEquals(result, None)
+      assertEquals(events, Nil)
+    }
+  }
 }

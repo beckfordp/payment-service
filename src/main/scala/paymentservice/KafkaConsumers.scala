@@ -9,14 +9,16 @@ import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Meter
 import purekafka.consumer.{DeadLetter, StreamSupervisor}
 
-/** Supervises the `DispatchFailed` consumer (US-18.2) independently, with its
-  * own DLQ (`fulfilment-events-dlq`).
+/** Supervises the `fulfilment-events` consumer independently, with its own DLQ
+  * (`fulfilment-events-dlq`). It handles `DispatchFailed` (US-18.2, void) and
+  * `DispatchConfirmed` (US-19.1, capture).
   */
 object KafkaConsumers {
 
   def supervised[F[_]: Async](
       config: KafkaConfig,
       store: PaymentStore[F],
+      methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
       logger: StructuredLogger[F],
       meter: Meter[F]
@@ -40,6 +42,7 @@ object KafkaConsumers {
           FulfilmentEventConsumer.run[F](
             config,
             store,
+            methods,
             gateway,
             logger,
             deadLetter
@@ -52,6 +55,7 @@ object KafkaConsumers {
   def resource[F[_]: Async](
       config: KafkaConfig,
       store: PaymentStore[F],
+      methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
       logger: StructuredLogger[F],
       meter: Meter[F]
@@ -59,6 +63,7 @@ object KafkaConsumers {
     supervised[F](
       config,
       store,
+      methods,
       gateway,
       logger,
       meter

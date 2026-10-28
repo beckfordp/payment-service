@@ -75,9 +75,10 @@ implemented.
 ## Events
 One topic per domain with a shared envelope (ADR 0009, migrated
 2026-10-11, `kafka-envelope_20261011`), plus the 2026-10-26 sync-payment-auth
-decision: authorization is a synchronous REST call from order-service, so this
-service consumes no Kafka topics today (the old `OrderReserved` consumer was
-retired by Rework 7).
+decision: authorization is a synchronous REST call from order-service. This
+service consumes `fulfilment-events` (`DispatchFailed` since US-18.2,
+`DispatchConfirmed` since US-19.1); the old `OrderReserved` consumer was
+retired by Rework 7.
 - Publishes: `payment-events` — four contracts pinned in
   `gluon/docs/system-design.md`: `PaymentAuthorized` (authorize-success async
   side effect, Journey 1), `PaymentCaptured` (capture on dispatch, Journey 4),
@@ -85,8 +86,9 @@ retired by Rework 7).
   (capture-decline only, with `reason: capture_failed`; authorize-decline stays
   synchronous and publishes nothing). All via the `outbox_events` table +
   Debezium CDC, keyed and `correlationId`'d by `orderId`. `PaymentAuthorized`
-  is written by `PaymentStore.recordAuthorization` (Journey 1); the other
-  three producers land with Journeys 4/5.
+  is written by `PaymentStore.recordAuthorization` (Journey 1);
+  `PaymentCaptured`/`PaymentFailed` by `recordCapture`/`recordCaptureFailure`
+  (US-19.1); `PaymentAuthorizationExpired` lands with Journey 5's sweep.
 
 ## Out of scope for this service
 - Auth/identity (bare `customerId`/`orderId` for now — no user-service yet)
@@ -100,3 +102,11 @@ retired by Rework 7).
   `Authorized` payment via `PaymentGatewayClient.void`, then marks it
   `Voided`. Missing/non-authorized payments are logged and skipped; a gateway
   failure retries through the DLQ and leaves the payment authorized.
+- US-19.1 (2026-10-28): the same consumer handles
+  `fulfilment-events: DispatchConfirmed` — looks up the payment by `orderId`,
+  resolves its card token via `PaymentMethodStore`, captures the hold, then
+  atomically marks it `Captured` + writes `PaymentCaptured` to the outbox. A
+  simulated capture decline marks it `Failed` and writes `PaymentFailed
+  {reason: capture_failed}`. The conditional `authorized -> captured|failed`
+  update is the idempotency guard: a redelivered `DispatchConfirmed` finds no
+  authorized row and no-ops.

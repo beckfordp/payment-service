@@ -53,6 +53,9 @@ class PaymentStatusSuite extends CatsEffectSuite {
   }
 
   test("fromString parses voided as Voided") {
-    assertEquals(PaymentStatus.fromString("voided"), Right(PaymentStatus.Voided))
+    assertEquals(
+      PaymentStatus.fromString("voided"),
+      Right(PaymentStatus.Voided)
+    )
   }
 }

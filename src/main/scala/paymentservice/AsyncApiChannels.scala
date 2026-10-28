@@ -8,18 +8,20 @@ import purekafka.docs.{
 }
 
 /** Registers payment-service's Kafka event contracts for AsyncAPI documentation
-  * (ADR 0010's AsyncAPI follow-up). All four are `payment-events` publishes via
+  * (ADR 0010's AsyncAPI follow-up). The `payment-events` publishes go through
   * this service's own `outbox_events` table and the Debezium CDC connector's
   * `route.topic.replacement` config
   * (`infra/k8s/local-infra/debezium-connectors-register.yaml`, gluon repo), not
   * direct producer calls - hence `Publish(Cdc)`, mirroring
   * order-service's/inventory-service's own doc-comment convention.
   *
-  * The producers land with Checkout Journeys 1/4/5 (synchronous
-  * `POST /payments/authorize`, capture-on-dispatch, and the expiry sweep), so
-  * no code writes these rows yet. payment-service no longer consumes
-  * `order-events: OrderReserved` - authorization is the synchronous REST call
-  * now - so there are no Subscribe channels here.
+  * `PaymentAuthorized` is written by Journey 1's synchronous
+  * `POST /payments/authorize`; `PaymentCaptured`/`PaymentFailed` by Journey 4's
+  * capture-on-dispatch (US-19.1). `PaymentAuthorizationExpired` lands with
+  * Journey 5's expiry sweep. Subscribes cover `DispatchFailed` (US-18.2, void)
+  * and `DispatchConfirmed` (US-19.1, capture); the old
+  * `order-events: OrderReserved` subscription stays retired - authorization is
+  * the synchronous REST call now.
   *
   * Implements `AsyncApiChannelsProvider` (not just a plain `List`) so the
   * sbt-purekafka-docs plugin's `AsyncApiSpecWriter` can load this singleton
@@ -48,6 +50,11 @@ object AsyncApiChannels extends AsyncApiChannelsProvider {
     AsyncApiChannel[DispatchFailedEvent](
       topic = "fulfilment-events",
       eventType = "DispatchFailed",
+      direction = ChannelDirection.Subscribe
+    ),
+    AsyncApiChannel[DispatchConfirmedEvent](
+      topic = "fulfilment-events",
+      eventType = "DispatchConfirmed",
       direction = ChannelDirection.Subscribe
     ),
     AsyncApiChannel[PaymentAuthorizationExpiredEvent](

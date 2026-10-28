@@ -31,6 +31,10 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
       |  outcomes {
       |    "tok_visa_0002" = "decline:insufficient_funds"
       |  }
+      |  default-capture-outcome = "approve"
+      |  capture-outcomes {
+      |    "tok_mastercard_4444" = "decline:capture_declined"
+      |  }
       |  authorization-ttl = 7d
       |}
       |kafka {
@@ -67,6 +71,12 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
               outcomes = Map(
                 "tok_visa_0002" -> GatewayOutcome.Decline("insufficient_funds")
               ),
+              defaultCaptureOutcome = GatewayOutcome.Approve,
+              captureOutcomes = Map(
+                "tok_mastercard_4444" -> GatewayOutcome.Decline(
+                  "capture_declined"
+                )
+              ),
               authorizationTtl = 7.days
             )
           ),
@@ -87,6 +97,14 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
   test("fails to load when a gateway outcome string is invalid") {
     val badOutcome =
       validHocon + "payment-gateway.simulated.outcomes.\"tok_visa_4242\" = \"maybe\"\n"
+    assert(
+      ConfigSource.string(badOutcome).load[PaymentServiceConfig].isLeft
+    )
+  }
+
+  test("fails to load when a capture outcome string is invalid") {
+    val badOutcome =
+      validHocon + "payment-gateway.simulated.capture-outcomes.\"tok_visa_4242\" = \"maybe\"\n"
     assert(
       ConfigSource.string(badOutcome).load[PaymentServiceConfig].isLeft
     )
@@ -135,6 +153,10 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
           defaultOutcome = GatewayOutcome.Approve,
           outcomes = Map(
             "tok_visa_0002" -> GatewayOutcome.Decline("insufficient_funds")
+          ),
+          defaultCaptureOutcome = GatewayOutcome.Approve,
+          captureOutcomes = Map(
+            "tok_mastercard_4444" -> GatewayOutcome.Decline("capture_declined")
           ),
           authorizationTtl = 7.days
         )

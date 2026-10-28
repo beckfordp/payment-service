@@ -15,24 +15,32 @@
   `cors_20261010` track (TD-1.3).
 
 ## Messaging
-- No Kafka consumer/producer runtime in this service today: payment
-  authorization is a synchronous REST call (2026-10-26 decision), and the four
-  `payment-events` contracts are published through the `outbox_events` table +
-  Debezium CDC. `PaymentAuthorized` is written in the same transaction as its
-  `Authorized` payment row (`PaymentStore.recordAuthorization`, Journey 1);
-  the other three land with Journeys 4/5. The old
-  `OrderReservedConsumer`/`KafkaConsumers`/fs2-kafka wiring was retired by
-  Rework 7.
+- Payment authorization is a synchronous REST call (2026-10-26 decision). The
+  four `payment-events` contracts are published through the `outbox_events`
+  table + Debezium CDC: `PaymentAuthorized` in the same transaction as its
+  `Authorized` row (`PaymentStore.recordAuthorization`, Journey 1),
+  `PaymentCaptured`/`PaymentFailed` in the capture transition (`recordCapture`/
+  `recordCaptureFailure`, US-19.1), and `PaymentAuthorizationExpired` with
+  Journey 5's sweep.
+- Kafka consumption is back via fs2-kafka: `FulfilmentEventConsumer` consumes
+  `fulfilment-events` — `DispatchFailed` voids a hold (US-18.2),
+  `DispatchConfirmed` captures it (US-19.1) — supervised by purekafka's
+  `StreamSupervisor` with its own `DeadLetter` DLQ. The old
+  `OrderReservedConsumer` was retired by Rework 7; it stays retired.
 - purekafka (`io.github.beckfordp`) — supplies the `purekafka.docs` AsyncAPI
-  types (`AsyncApiChannel`, `PublisherKind.Cdc`); no supervision/DLQ usage
-  until a consumer returns.
+  types (`AsyncApiChannel`, `PublisherKind.Cdc`) plus `StreamSupervisor` and the
+  `DeadLetter` retry/DLQ machinery.
 
 ## Payment gateway
 - `PaymentGatewayClient[F]` (`authorize`/`capture`/`void`, ADR 0011) — only a
-  `simulated` interpreter, no real provider, no network. Outcome keyed by
-  simulated card token from PureConfig `payment-gateway.simulated`
-  (`default-outcome`, `outcomes { "tok_visa_0002" = "decline:insufficient_funds" }`,
-  `authorization-ttl = 7d`). Added 2026-10-27 (`checkout-authorize_20261027`).
+  `simulated` interpreter, no real provider, no network. Outcomes are keyed by
+  simulated card token from PureConfig `payment-gateway.simulated`:
+  `default-outcome`/`outcomes` for authorize
+  (`"tok_visa_0002" = "decline:insufficient_funds"`),
+  `default-capture-outcome`/`capture-outcomes` for capture US-19.1
+  (`"tok_mastercard_4444" = "decline:capture_declined"`), plus
+  `authorization-ttl = 7d`. Added 2026-10-27 (`checkout-authorize_20261027`);
+  capture outcomes added 2026-10-28 (`capture-on-dispatch_20261028`).
 
 ## API layer
 - tapir 1.11.25 — route definitions and generated Swagger/OpenAPI docs

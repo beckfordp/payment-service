@@ -17,6 +17,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       outcomes = Map(
         "tok_visa_0002" -> GatewayOutcome.Decline("insufficient_funds")
       ),
+      defaultCaptureOutcome = GatewayOutcome.Approve,
+      captureOutcomes = Map.empty,
       authorizationTtl = 7.days
     )
   )
@@ -141,6 +143,9 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
               case Some(p) => recorded.update(_ :+ p)
               case None    => IO.unit
             }
+        def recordCapture(o: String) = payments.recordCapture(o)
+        def recordCaptureFailure(o: String, r: String) =
+          payments.recordCaptureFailure(o, r)
       }
       _ <- f0
         .copy(payments = spying)
@@ -203,7 +208,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       spyGateway = new PaymentGatewayClient[IO] {
         def authorize(token: String, amount: Int) =
           gateway.authorize(token, amount)
-        def capture(authId: String) = gateway.capture(authId)
+        def capture(authId: String, cardToken: String) =
+          gateway.capture(authId, cardToken)
         def void(authId: String) = voided.update(_ :+ authId)
       }
       failingPayments = new PaymentStore[IO] {
@@ -222,6 +228,9 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
           IO.raiseError(new RuntimeException("db down"))
         def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
           f.payments.recordDecline(o, a, m, r)
+        def recordCapture(o: String) = f.payments.recordCapture(o)
+        def recordCaptureFailure(o: String, r: String) =
+          f.payments.recordCaptureFailure(o, r)
       }
       response <- AuthorizeRoutes
         .routes[IO](failingPayments, f.methods, spyGateway, NoOpLogger[IO])
@@ -254,7 +263,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     new PaymentGatewayClient[IO] {
       def authorize(token: String, amount: Int) =
         calls.update(_ + 1) *> gateway.authorize(token, amount)
-      def capture(authId: String) = gateway.capture(authId)
+      def capture(authId: String, cardToken: String) =
+        gateway.capture(authId, cardToken)
       def void(authId: String) = voided.update(_ :+ authId)
     }
 
@@ -385,7 +395,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
           "order-race",
           4999,
           f.approveId,
-          Authorization("auth_winner", java.time.Instant.parse("2026-11-03T12:00:00Z"))
+          Authorization(
+            "auth_winner",
+            java.time.Instant.parse("2026-11-03T12:00:00Z")
+          )
         )
         .map(_.getOrElse(fail("expected the winner row")))
       lookups <- cats.effect.Ref.of[IO, Int](0)
@@ -408,6 +421,9 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         ) = IO.pure(None)
         def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
           f.payments.recordDecline(o, a, m, r)
+        def recordCapture(o: String) = f.payments.recordCapture(o)
+        def recordCaptureFailure(o: String, r: String) =
+          f.payments.recordCaptureFailure(o, r)
       }
       routes = AuthorizeRoutes.routes[IO](
         racingStore,
@@ -449,6 +465,9 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         ) = IO.pure(None)
         def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
           f.payments.recordDecline(o, a, m, r)
+        def recordCapture(o: String) = f.payments.recordCapture(o)
+        def recordCaptureFailure(o: String, r: String) =
+          f.payments.recordCaptureFailure(o, r)
       }
       routes = AuthorizeRoutes.routes[IO](
         racingStore,

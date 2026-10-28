@@ -42,6 +42,12 @@ class PaymentRoutesSuite extends CatsEffectSuite {
           paymentMethodId: String,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
+      def recordCapture(orderId: String): IO[Option[Payment]] =
+        IO.raiseError(error)
+      def recordCaptureFailure(
+          orderId: String,
+          reason: String
+      ): IO[Option[Payment]] = IO.raiseError(error)
     }
 
   test("POST /payments returns 201 with the created entity") {

@@ -2,7 +2,7 @@
 
 ## Phase 1: Store capture transitions + outbox
 
-- [ ] Task: Failing tests — `recordCapture`/`recordCaptureFailure` in both interpreters: authorized -> captured/failed, outbox `PaymentCaptured`/`PaymentFailed` payloads, `None` + no event from pending/captured/failed/voided, rollback when the outbox insert fails; update the stale "update to Captured writes no outbox row" test (Red)
+- [~] Task: Failing tests — `recordCapture`/`recordCaptureFailure` in both interpreters: authorized -> captured/failed, outbox `PaymentCaptured`/`PaymentFailed` payloads, `None` + no event from pending/captured/failed/voided, rollback when the outbox insert fails; update the stale "update to Captured writes no outbox row" test (Red)
 - [ ] Task: Implement the two envelope builders and both store methods (Green)
 - [ ] Task: Refactor, `sbt scalafmtCheck test` green
 - [ ] Task: Conductor - User Manual Verification 'Store capture transitions + outbox' (Protocol in workflow.md)
