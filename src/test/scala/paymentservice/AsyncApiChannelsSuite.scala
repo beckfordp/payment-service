@@ -18,7 +18,7 @@ class AsyncApiChannelsSuite extends FunSuite {
   private val sampleInstant = Instant.parse("2026-10-26T00:00:00Z")
 
   test(
-    "AsyncApiChannels.channels registers exactly the four sync-payment-auth event types on payment-events"
+    "AsyncApiChannels.channels registers the four payment-events contracts and the consumed DispatchFailed"
   ) {
     assertEquals(
       AsyncApiChannels.channels.map(c => c.topic -> c.eventType).toSet,
@@ -26,20 +26,25 @@ class AsyncApiChannelsSuite extends FunSuite {
         "payment-events" -> "PaymentAuthorized",
         "payment-events" -> "PaymentCaptured",
         "payment-events" -> "PaymentAuthorizationExpired",
-        "payment-events" -> "PaymentFailed"
+        "payment-events" -> "PaymentFailed",
+        "fulfilment-events" -> "DispatchFailed"
       )
     )
   }
 
   test(
-    "all four registered event types are Publish(Cdc) - payment-service's outbox/Debezium publishes them"
+    "payment-events contracts are Publish(Cdc); DispatchFailed is Subscribe-only"
   ) {
-    for (channel <- AsyncApiChannels.channels)
+    for (channel <- AsyncApiChannels.channels.filter(_.topic == "payment-events"))
       assertEquals(
         channel.direction,
         ChannelDirection.Publish(PublisherKind.Cdc): ChannelDirection,
         s"expected ${channel.eventType} to be Publish(Cdc)"
       )
+
+    val consumed =
+      AsyncApiChannels.channels.find(_.eventType == "DispatchFailed").get
+    assertEquals(consumed.direction, ChannelDirection.Subscribe: ChannelDirection)
   }
 
   test("the retired PaymentSettled and OrderReserved event types are gone") {

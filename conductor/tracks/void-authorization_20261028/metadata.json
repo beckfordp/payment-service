@@ -1,0 +1,8 @@
+{
+  "track_id": "void-authorization_20261028",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-10-28T18:00:00Z",
+  "updated_at": "2026-10-28T18:00:00Z",
+  "description": "US-18.2 — consume fulfilment-events DispatchFailed and void the held authorization"
+}

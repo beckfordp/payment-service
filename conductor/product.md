@@ -94,3 +94,9 @@ retired by Rework 7).
   `orderId` is a logical reference only, never a real FK)
 - Choice of real payment provider (Stripe etc.) vs. simulated charge — open
   ADR, see `gluon/backlogs/payment-service.md`
+
+- US-18.2 (2026-10-28): `FulfilmentEventConsumer` consumes
+  `fulfilment-events: DispatchFailed`, voids the gateway hold for an
+  `Authorized` payment via `PaymentGatewayClient.void`, then marks it
+  `Voided`. Missing/non-authorized payments are logged and skipped; a gateway
+  failure retries through the DLQ and leaves the payment authorized.

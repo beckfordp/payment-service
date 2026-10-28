@@ -3,6 +3,12 @@ package paymentservice
 import cats.effect.IO
 import munit.CatsEffectSuite
 import pureconfig.ConfigSource
+import purekafka.consumer.StreamSupervisorConfig
+import purekafka.resilience.{
+  CircuitBreakerConfig => KafkaCircuitBreakerConfig,
+  ResilienceConfig => KafkaResilienceConfig,
+  RetryConfig => KafkaRetryConfig
+}
 
 import scala.concurrent.duration._
 
@@ -26,6 +32,15 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
       |    "tok_visa_0002" = "decline:insufficient_funds"
       |  }
       |  authorization-ttl = 7d
+      |}
+      |kafka {
+      |  bootstrap-servers = "localhost:9092"
+      |  dlq-retry { max-retries = 3, base-delay = 200ms }
+      |  dlq-publish-resilience {
+      |    retry { max-retries = 3, base-delay = 100ms }
+      |    circuit-breaker { failure-threshold = 5, reset-timeout = 30s }
+      |  }
+      |  stream-supervisor { base-delay = 1s, max-delay = 30s }
       |}
       |""".stripMargin
 
@@ -54,6 +69,15 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
               ),
               authorizationTtl = 7.days
             )
+          ),
+          kafka = KafkaConfig(
+            bootstrapServers = "localhost:9092",
+            dlqRetry = KafkaRetryConfig(3, 200.millis),
+            dlqPublishResilience = KafkaResilienceConfig(
+              retry = KafkaRetryConfig(3, 100.millis),
+              circuitBreaker = KafkaCircuitBreakerConfig(5, 30.seconds)
+            ),
+            streamSupervisor = StreamSupervisorConfig(1.second, 30.seconds)
           )
         )
       )
@@ -104,6 +128,7 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
           "payment"
         )
       )
+      assertEquals(config.kafka.bootstrapServers, "localhost:9092")
       assertEquals(
         config.paymentGateway.simulated,
         SimulatedGatewayConfig(

@@ -9,6 +9,7 @@ sealed trait PaymentStatus {
     case PaymentStatus.Authorized => "authorized"
     case PaymentStatus.Captured   => "captured"
     case PaymentStatus.Failed     => "failed"
+    case PaymentStatus.Voided     => "voided"
   }
 }
 
@@ -17,12 +18,14 @@ object PaymentStatus {
   case object Authorized extends PaymentStatus
   case object Captured extends PaymentStatus
   case object Failed extends PaymentStatus
+  case object Voided extends PaymentStatus
 
   def fromString(raw: String): Either[String, PaymentStatus] = raw match {
     case "pending"    => Right(Pending)
     case "authorized" => Right(Authorized)
     case "captured"   => Right(Captured)
     case "failed"     => Right(Failed)
+    case "voided"     => Right(Voided)
     case other        => Left(s"Invalid payment status: '$other'")
   }
 }

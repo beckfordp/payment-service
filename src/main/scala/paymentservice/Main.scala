@@ -37,6 +37,13 @@ object Main extends IOApp.Simple {
     gateway = PaymentGatewayClient.simulated[IO](
       config.paymentGateway.simulated
     )
+    _ <- KafkaConsumers.resource[IO](
+      config.kafka,
+      store,
+      gateway,
+      telemetry.logger,
+      telemetry.meter
+    )
     routes = AppRoutes.all[IO](
       store,
       methods,

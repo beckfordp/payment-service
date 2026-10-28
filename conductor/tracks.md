@@ -7,6 +7,9 @@ This file tracks all major tracks for the project.
 
 ---
 
+- [~] **Track: US-18.2 — void authorization on DispatchFailed**
+  *Link: [./tracks/void-authorization_20261028/](./tracks/void-authorization_20261028/)*
+
 ## Backlog
 
 Title-only placeholders for future tracks — not yet detailed (no spec/plan, no linked

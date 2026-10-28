@@ -45,9 +45,14 @@ class PaymentStatusSuite extends CatsEffectSuite {
       PaymentStatus.Pending,
       PaymentStatus.Authorized,
       PaymentStatus.Captured,
-      PaymentStatus.Failed
+      PaymentStatus.Failed,
+      PaymentStatus.Voided
     ).foreach { status =>
       assertEquals(PaymentStatus.fromString(status.asString), Right(status))
     }
+  }
+
+  test("fromString parses voided as Voided") {
+    assertEquals(PaymentStatus.fromString("voided"), Right(PaymentStatus.Voided))
   }
 }
