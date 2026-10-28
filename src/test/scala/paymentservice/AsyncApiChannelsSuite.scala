@@ -45,14 +45,16 @@ class AsyncApiChannelsSuite extends FunSuite {
         s"expected ${channel.eventType} to be Publish(Cdc)"
       )
 
-    for (
-      eventType <- List("DispatchFailed", "DispatchConfirmed");
-      consumed <- AsyncApiChannels.channels.find(_.eventType == eventType)
-    )
+    for (eventType <- List("DispatchFailed", "DispatchConfirmed")) {
+      val consumed = AsyncApiChannels.channels
+        .find(_.eventType == eventType)
+        .getOrElse(fail(s"expected a $eventType channel"))
       assertEquals(
         consumed.direction,
-        ChannelDirection.Subscribe: ChannelDirection
+        ChannelDirection.Subscribe: ChannelDirection,
+        s"expected $eventType to be Subscribe"
       )
+    }
   }
 
   test("the retired PaymentSettled and OrderReserved event types are gone") {
