@@ -99,7 +99,7 @@ cleanup_order() {
   kubectl exec -n "$NAMESPACE" deploy/fulfilment-postgres -- psql -U fulfilment -d fulfilment -q -c \
     "delete from outbox_events where aggregate_id = '$order_id'; delete from fulfilment_task where order_id = '$order_id'" >/dev/null
   kubectl exec -n "$NAMESPACE" deploy/payment-postgres -- psql -U payment -d payment -q -c \
-    "delete from outbox_events where aggregate_id = '$order_id'; delete from payment where order_id = '$order_id'; delete from payment_methods where customer_id = '$CUSTOMER'" >/dev/null
+    "delete from outbox_events where aggregate_id = '$order_id'; delete from payment where order_id = '$order_id'" >/dev/null
 }
 
 echo "== US-19.1 live verification =="
@@ -142,5 +142,8 @@ echo "   capture declined, PaymentFailed published"
 echo "-- cleaning up --"
 cleanup_order "$ORDER_OK"
 cleanup_order "$ORDER_DECLINED"
+# Methods last: each order's payment row references its customer's method.
+kubectl exec -n "$NAMESPACE" deploy/payment-postgres -- psql -U payment -d payment -q -c \
+  "delete from payment_methods where customer_id = '$CUSTOMER'" >/dev/null
 
 echo "All US-19.1 live checks passed."
