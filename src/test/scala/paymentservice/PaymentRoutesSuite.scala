@@ -387,4 +387,46 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       }
     }
   }
+
+  test("POST /payments returns 409 for a second payment on the same order") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
+      post = Request[IO](Method.POST, uri"/payments")
+        .withEntity(CreatePaymentRequest("order-dup", 4999))
+      first <- routes.orNotFound.run(post)
+      second <- routes.orNotFound.run(
+        Request[IO](Method.POST, uri"/payments")
+          .withEntity(CreatePaymentRequest("order-dup", 4999))
+      )
+      body <- second.as[ErrorResponse]
+    } yield {
+      assertEquals(first.status, Status.Created)
+      assertEquals(second.status, Status.Conflict)
+      assert(body.error.contains("order-dup"), body.error)
+    }
+  }
+
+  test(
+    "POST /payments returns 400 for a non-positive amount or blank orderId"
+  ) {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
+      responses <- List(
+        CreatePaymentRequest("order-zero", 0),
+        CreatePaymentRequest("order-negative", -1),
+        CreatePaymentRequest("  ", 4999)
+      ).traverse { req =>
+        routes.orNotFound.run(
+          Request[IO](Method.POST, uri"/payments").withEntity(req)
+        )
+      }
+      persisted <- List("order-zero", "order-negative", "  ")
+        .traverse(store.findByOrderId)
+    } yield {
+      assertEquals(responses.map(_.status), List.fill(3)(Status.BadRequest))
+      assertEquals(persisted.flatten, Nil)
+    }
+  }
 }

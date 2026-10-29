@@ -39,8 +39,8 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("create produces distinct ids across calls") {
     for {
       store <- PaymentStore.inMemory[IO]
-      first <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-      second <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+      first <- store.create("order-a", 4999)
+      second <- store.create("order-b", 4999)
     } yield assertNotEquals(first.id, second.id)
   }
 
@@ -66,7 +66,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   }
 
   private val authorization =
-    Authorization("auth_1", Instant.parse("2026-11-03T12:00:00Z"))
+    Authorization("auth_1", Instant.parse("2099-11-03T12:00:00Z"))
 
   test(
     "recordAuthorization stores an Authorized payment and one outbox event"
@@ -330,6 +330,31 @@ class PaymentStoreSuite extends CatsEffectSuite {
     } yield {
       assertEquals(result, None)
       assertEquals(events, Nil)
+    }
+  }
+
+  test("create rejects a second payment for the same order") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      _ <- store.create("order-dup", 4999)
+      result <- store.create("order-dup", 4999).attempt
+    } yield assertEquals(result, Left(PaymentAlreadyExists("order-dup")))
+  }
+
+  test("recordCapture leaves an expired authorization untouched") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      _ <- store.recordAuthorization(
+        "order-expired",
+        4999,
+        paymentMethodId,
+        Authorization("auth-x", Instant.parse("2020-01-01T00:00:00Z"))
+      )
+      result <- store.recordCapture("order-expired")
+      after <- store.findByOrderId("order-expired")
+    } yield {
+      assertEquals(result, None)
+      assertEquals(after.map(_.status), Some(PaymentStatus.Authorized))
     }
   }
 }

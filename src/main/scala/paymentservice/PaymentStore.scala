@@ -34,6 +34,8 @@ final case class Payment(
 )
 
 trait PaymentStore[F[_]] {
+
+  /** Raises [[PaymentAlreadyExists]] when the order already has a payment. */
   def create(orderId: String, amountCents: Int): F[Payment]
   def get(id: PaymentId): F[Option[Payment]]
   def delete(id: PaymentId): F[Boolean]
@@ -71,8 +73,8 @@ trait PaymentStore[F[_]] {
   /** Atomically transitions an `Authorized` payment to `Captured` and writes
     * its `PaymentCaptured` outbox row (US-19.1). The conditional update is the
     * idempotency guard: `None` when the order has no authorized payment (a
-    * duplicate `DispatchConfirmed` or an unknown order), and nothing is
-    * written.
+    * duplicate `DispatchConfirmed` or an unknown order) or the authorization
+    * has expired, and nothing is written.
     */
   def recordCapture(orderId: String): F[Option[Payment]]
 
@@ -194,7 +196,17 @@ object PaymentStore {
 
       val store = new PaymentStore[F] {
         def create(orderId: String, amountCents: Int): F[Payment] =
-          insert(orderId, amountCents, defaultStatus, identity)
+          for {
+            id <- Sync[F].delay(PaymentId.fromUuid(java.util.UUID.randomUUID()))
+            now <- Sync[F].realTimeInstant
+            entity = Payment(id, orderId, amountCents, defaultStatus, now, now)
+            inserted <- ref.modify { entities =>
+              if (entities.values.exists(_.orderId == orderId))
+                (entities, false)
+              else (entities + (id -> entity), true)
+            }
+            _ <- Sync[F].raiseUnless(inserted)(PaymentAlreadyExists(orderId))
+          } yield entity
 
         def get(id: PaymentId): F[Option[Payment]] = ref.get.map(_.get(id))
 
@@ -272,7 +284,9 @@ object PaymentStore {
             transitioned <- ref.modify { entities =>
               entities.values.find(_.orderId == orderId) match {
                 case Some(existing)
-                    if existing.status == PaymentStatus.Authorized =>
+                    if existing.status == PaymentStatus.Authorized &&
+                      (status != PaymentStatus.Captured ||
+                        existing.expiresAt.exists(_.isAfter(now))) =>
                   val next = existing.copy(
                     status = status,
                     updatedAt = now,
@@ -366,6 +380,7 @@ object PaymentStore {
     sql"""
       INSERT INTO "payment" (id, order_id, amount_cents, status)
       VALUES ($uuid, $text, $int4, $paymentStatus)
+      ON CONFLICT (order_id) DO NOTHING
       RETURNING created_at, updated_at
     """.query(timestamptz *: timestamptz)
 
@@ -444,10 +459,11 @@ object PaymentStore {
   /** Conditional `expected -> status` transition. The `WHERE status = expected`
     * guard is the idempotency check: a duplicate `DispatchConfirmed` (or an
     * unknown order) updates nothing and returns no row, so no outbox event is
-    * written.
+    * written. With `requireLive` an expired authorization doesn't match either
+    *   - captures only.
     */
   private val transitionPayment: skunk.Query[
-    (PaymentStatus, Option[String], String, PaymentStatus),
+    (PaymentStatus, Option[String], String, PaymentStatus, Boolean),
     (UUID, PaymentRow)
   ] =
     sql"""
@@ -456,6 +472,7 @@ object PaymentStore {
           decline_reason = COALESCE(${text.opt}, decline_reason),
           updated_at = now()
       WHERE order_id = $text AND status = $paymentStatus
+        AND (NOT $bool OR expires_at > now())
       RETURNING id, order_id, amount_cents, status, created_at, updated_at,
                 payment_method_id, auth_id, expires_at, decline_reason
     """.query(paymentWithIdRow)
@@ -564,15 +581,19 @@ object PaymentStore {
               def create(orderId: String, amountCents: Int): F[Payment] =
                 for {
                   id <- Sync[F].delay(UUID.randomUUID())
-                  timestamps <- timed("insert") {
+                  inserted <- timed("insert") {
                     pool.use { session =>
                       session
                         .prepare(insertPayment)
                         .flatMap(
-                          _.unique((id, orderId, amountCents, defaultStatus))
+                          _.option((id, orderId, amountCents, defaultStatus))
                         )
                     }
                   }
+                  timestamps <- Sync[F].fromOption(
+                    inserted,
+                    PaymentAlreadyExists(orderId)
+                  )
                 } yield {
                   val (createdAt, updatedAt) = timestamps
                   Payment(
@@ -672,7 +693,13 @@ object PaymentStore {
                         .prepare(transitionPayment)
                         .flatMap(
                           _.option(
-                            (status, reason, orderId, PaymentStatus.Authorized)
+                            (
+                              status,
+                              reason,
+                              orderId,
+                              PaymentStatus.Authorized,
+                              status == PaymentStatus.Captured
+                            )
                           )
                         )
                         .flatMap {

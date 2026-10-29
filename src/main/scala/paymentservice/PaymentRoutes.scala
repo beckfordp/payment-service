@@ -46,6 +46,13 @@ object PaymentResponse {
 
 final case class ErrorResponse(error: String)
 
+sealed trait CreatePaymentError
+
+object CreatePaymentError {
+  final case class Invalid(error: String) extends CreatePaymentError
+  final case class Conflict(error: String) extends CreatePaymentError
+}
+
 object ErrorResponse {
   implicit val codec: Codec[ErrorResponse] = deriveCodec
 }
@@ -54,7 +61,7 @@ object PaymentRoutes {
 
   private val createPaymentEndpoint: PublicEndpoint[
     CreatePaymentRequest,
-    Unit,
+    CreatePaymentError,
     PaymentResponse,
     Any
   ] =
@@ -63,6 +70,30 @@ object PaymentRoutes {
       .in(jsonBody[CreatePaymentRequest])
       .out(statusCode(StatusCode.Created))
       .out(jsonBody[PaymentResponse])
+      .errorOut(
+        oneOf[CreatePaymentError](
+          oneOfVariant(
+            statusCode(StatusCode.BadRequest)
+              .and(jsonBody[ErrorResponse])
+              .map[CreatePaymentError.Invalid](e =>
+                CreatePaymentError.Invalid(e.error)
+              )(e => ErrorResponse(e.error))
+          ),
+          oneOfVariant(
+            statusCode(StatusCode.Conflict)
+              .and(jsonBody[ErrorResponse])
+              .map[CreatePaymentError.Conflict](e =>
+                CreatePaymentError.Conflict(e.error)
+              )(e => ErrorResponse(e.error))
+          )
+        )
+      )
+
+  private def validate(req: CreatePaymentRequest): Either[String, Unit] =
+    for {
+      _ <- Either.cond(req.orderId.trim.nonEmpty, (), "orderId is required")
+      _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
+    } yield ()
 
   private val notFoundVariant
       : EndpointOutput.OneOfVariant[PaymentNotFound.type] =
@@ -99,22 +130,41 @@ object PaymentRoutes {
       store: PaymentStore[F],
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
-    createPaymentEndpoint.serverLogicSuccess[F] { req =>
-      for {
-        _ <- logger.info(
-          Map(
-            "method" -> "POST",
-            "path" -> "/payments"
-          )
-        )("Received request")
-        entity <- store.create(req.orderId, req.amountCents).onError {
-          case error =>
+    createPaymentEndpoint.serverLogic[F] { req =>
+      def create: F[Either[CreatePaymentError, PaymentResponse]] =
+        store
+          .create(req.orderId, req.amountCents)
+          .attemptNarrow[PaymentAlreadyExists]
+          .flatMap {
+            case Right(entity) =>
+              logger
+                .info(Map("payment_id" -> PaymentId.render(entity.id)))(
+                  "Request completed"
+                )
+                .as(Right(PaymentResponse(entity)))
+            case Left(conflict) =>
+              logger
+                .warn(Map("order_id" -> req.orderId))(
+                  "Order already has a payment"
+                )
+                .as(Left(CreatePaymentError.Conflict(conflict.getMessage)))
+          }
+          .onError { case error =>
             logger.error(Map.empty, error)("Persisting the payment failed")
-        }
-        _ <- logger.info(
-          Map("payment_id" -> PaymentId.render(entity.id))
-        )("Request completed")
-      } yield PaymentResponse(entity)
+          }
+
+      logger.info(
+        Map(
+          "method" -> "POST",
+          "path" -> "/payments"
+        )
+      )("Received request") *> (validate(req) match {
+        case Left(error) =>
+          logger
+            .warn(Map("error" -> error))("Invalid payment request")
+            .as(Left(CreatePaymentError.Invalid(error)))
+        case Right(()) => create
+      })
     }
 
   def getPaymentServerEndpoint[F[_]: Monad](

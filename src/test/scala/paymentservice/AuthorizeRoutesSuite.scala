@@ -423,7 +423,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
           PaymentMethodId.parse(f.approveId).toOption.get,
           Authorization(
             "auth_winner",
-            java.time.Instant.parse("2026-11-03T12:00:00Z")
+            java.time.Instant.parse("2099-11-03T12:00:00Z")
           )
         )
         .map(_.getOrElse(fail("expected the winner row")))
@@ -570,6 +570,28 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     } yield {
       assertEquals(released.size, 1)
       assert(released.head.startsWith("auth_"), released.head)
+    }
+  }
+
+  test("replaying an expired authorization is a 409, not the stale authId") {
+    for {
+      f <- fixture
+      _ <- f.payments.recordAuthorization(
+        "order-expired",
+        4999,
+        PaymentMethodId.parse(f.approveId).toOption.get,
+        Authorization(
+          "auth_stale",
+          java.time.Instant.parse("2020-01-01T00:00:00Z")
+        )
+      )
+      response <- f.authorize(
+        AuthorizePaymentRequest("order-expired", 4999, f.approveId)
+      )
+      body <- response.as[ErrorResponse]
+    } yield {
+      assertEquals(response.status, Status.Conflict)
+      assert(body.error.toLowerCase.contains("expired"), body.error)
     }
   }
 }

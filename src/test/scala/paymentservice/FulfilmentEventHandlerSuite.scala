@@ -250,4 +250,67 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       )
     }
   }
+
+  private def assertDeadLettered(raw: String) =
+    for {
+      f <- fixture
+      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dl <- deadLetter(dlq)
+      _ <- handle(f.store, f.methods, dl)("k", raw)
+      routed <- dlq.get
+    } yield assertEquals(routed, List(("fulfilment-events-dlq", "k", raw)))
+
+  test("an undecodable envelope is dead-lettered raw") {
+    assertDeadLettered("{not json")
+  }
+
+  test("an undecodable DispatchConfirmed payload is dead-lettered raw") {
+    assertDeadLettered(envelope("DispatchConfirmed", Json.obj()))
+  }
+
+  test("an undecodable DispatchFailed payload is dead-lettered raw") {
+    assertDeadLettered(envelope("DispatchFailed", Json.obj()))
+  }
+
+  test("an unknown event type is dead-lettered raw") {
+    assertDeadLettered(envelope("DispatchExploded", Json.obj()))
+  }
+
+  test(
+    "DispatchConfirmed for an expired authorization is dead-lettered without a gateway call"
+  ) {
+    for {
+      (store, _) <- PaymentStore.inMemoryWithOutbox[IO]
+      methods <- PaymentMethodStore.inMemory[IO]
+      method <- methods.create(
+        "c1",
+        Card("4242", CardBrand.Visa, "12/99"),
+        Address("1 High St", None, "London", "SW1A 1AA", "GB")
+      )
+      orderId = UUID.randomUUID().toString
+      _ <- store.recordAuthorization(
+        orderId,
+        4999,
+        method.id,
+        Authorization("auth-old", Instant.parse("2020-01-01T00:00:00Z"))
+      )
+      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dl <- deadLetter(dlq)
+      captures <- Ref.of[IO, List[String]](Nil)
+      counting = new PaymentGatewayClient[IO] {
+        def authorize(t: String, a: Int) = gateway.authorize(t, a)
+        def capture(authId: String, t: String) =
+          captures.update(_ :+ authId) *> gateway.capture(authId, t)
+        def void(authId: String) = gateway.void(authId)
+      }
+      _ <- handle(store, methods, dl, counting)(orderId, confirmed(orderId))
+      routed <- dlq.get
+      captured <- captures.get
+      after <- store.findByOrderId(orderId)
+    } yield {
+      assertEquals(routed.map(_._1), List("fulfilment-events-dlq"))
+      assertEquals(captured, Nil)
+      assertEquals(after.map(_.status), Some(PaymentStatus.Authorized))
+    }
+  }
 }

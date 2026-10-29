@@ -1,6 +1,6 @@
 package paymentservice
 
-import cats.effect.{Async, MonadCancelThrow, Outcome}
+import cats.effect.{Async, Clock, MonadCancelThrow, Outcome}
 import cats.effect.syntax.all._
 import cats.syntax.all._
 import io.circe.Codec
@@ -132,7 +132,7 @@ object AuthorizeRoutes {
       _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
     } yield ()
 
-  def authorizeServerEndpoint[F[_]: MonadCancelThrow](
+  def authorizeServerEndpoint[F[_]: MonadCancelThrow: Clock](
       payments: PaymentStore[F],
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
@@ -146,11 +146,13 @@ object AuthorizeRoutes {
 
       /** A stored outcome for this order is replayed instead of placing a
         * second hold (TD-10.1). Different amount or method is always a `409`; a
-        * replayed decline is a `402` with the original reason.
+        * replayed decline is a `402` with the original reason; an expired
+        * authorization is a `409` rather than a stale `authId`.
         */
       def replay(
           existing: Payment,
-          methodId: PaymentMethodId
+          methodId: PaymentMethodId,
+          now: Instant
       ): Either[AuthorizeError, AuthorizePaymentResponse] =
         if (
           existing.amountCents != req.amountCents ||
@@ -165,6 +167,12 @@ object AuthorizeRoutes {
           existing.status match {
             case PaymentStatus.Authorized =>
               (existing.authId, existing.expiresAt) match {
+                case (Some(_), Some(expiresAt)) if !expiresAt.isAfter(now) =>
+                  Left(
+                    AuthorizeError.AlreadyProcessed(
+                      "Order's stored authorization has expired"
+                    )
+                  )
                 case (Some(authId), Some(expiresAt)) =>
                   Right(AuthorizePaymentResponse(authId, expiresAt))
                 case _ =>
@@ -199,7 +207,7 @@ object AuthorizeRoutes {
           .info(context + ("payment_id" -> PaymentId.render(existing.id)))(
             "Replaying the stored payment outcome"
           )
-          .as(replay(existing, methodId))
+          *> Clock[F].realTimeInstant.map(replay(existing, methodId, _))
 
       /** A concurrent call inserted the row first: release this call's fresh
         * hold (best-effort; the sweep covers a failed void) and replay the

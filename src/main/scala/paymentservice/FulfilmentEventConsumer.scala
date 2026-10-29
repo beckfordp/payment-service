@@ -111,6 +111,13 @@ object FulfilmentEventConsumer {
     def unrecorded(orderId: String, target: PaymentStatus): F[Unit] =
       Async[F].raiseError(UnrecordedTransition(orderId, target))
 
+    /** Schema drift must not silently stop captures: anything this consumer
+      * can't act on goes to the DLQ raw instead of being committed with only a
+      * log line.
+      */
+    def deadLetterRaw(raw: String, error: Throwable): F[Unit] =
+      deadLetter.guard(topic, key, raw)(Async[F].raiseError(error))
+
     def handleDispatchFailed(event: DispatchFailedEvent): F[Unit] =
       store.findByOrderId(event.orderId).flatMap {
         case None =>
@@ -185,7 +192,11 @@ object FulfilmentEventConsumer {
                     )
                   )
                 case Some(method) =>
-                  gateway.capture(authId, method.cardToken).flatMap {
+                  Async[F].realTimeInstant.flatMap { now =>
+                    Async[F].raiseUnless(
+                      payment.expiresAt.exists(_.isAfter(now))
+                    )(AuthorizationExpired(event.orderId))
+                  } *> gateway.capture(authId, method.cardToken).flatMap {
                     case Right(_) =>
                       store.recordCapture(event.orderId).flatMap {
                         case Some(_) =>
@@ -230,7 +241,7 @@ object FulfilmentEventConsumer {
               error
             )(
               "Failed to decode fulfilment-events envelope"
-            )
+            ) *> deadLetterRaw(raw, error)
           case Right(envelope) =>
             envelope.eventType match {
               case "DispatchFailed" =>
@@ -241,7 +252,7 @@ object FulfilmentEventConsumer {
                       error
                     )(
                       "Failed to decode DispatchFailed payload"
-                    )
+                    ) *> deadLetterRaw(raw, error)
                   case Right(event) =>
                     deadLetter.guard(topic, key, raw)(
                       handleDispatchFailed(event)
@@ -255,16 +266,22 @@ object FulfilmentEventConsumer {
                       error
                     )(
                       "Failed to decode DispatchConfirmed payload"
-                    )
+                    ) *> deadLetterRaw(raw, error)
                   case Right(event) =>
                     deadLetter.guard(topic, key, raw)(
                       handleDispatchConfirmed(event)
                     )
                 }
               case other =>
-                logger.info(
+                logger.warn(
                   Map("topic" -> topic, "event_type" -> other)
-                )("Ignoring unrelated fulfilment-events event type")
+                )("Unknown fulfilment-events event type") *>
+                  deadLetterRaw(
+                    raw,
+                    new IllegalArgumentException(
+                      s"Unknown fulfilment-events event type '$other'"
+                    )
+                  )
             }
         }
     }
@@ -275,6 +292,11 @@ object FulfilmentEventConsumer {
   * authorized row - raised so the record is retried / dead-lettered instead of
   * committed with the payment out of step with the gateway.
   */
+final case class AuthorizationExpired(orderId: String)
+    extends RuntimeException(
+      s"Authorization for order $orderId expired before it was captured"
+    )
+
 final case class UnrecordedTransition(orderId: String, target: PaymentStatus)
     extends RuntimeException(
       s"Payment for order $orderId was not authorized when recording ${target.asString}"

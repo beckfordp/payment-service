@@ -299,7 +299,7 @@ class PaymentStorePostgresSuite
   }
 
   private val authorization =
-    Authorization("auth_pg", Instant.parse("2026-11-03T12:00:00Z"))
+    Authorization("auth_pg", Instant.parse("2099-11-03T12:00:00Z"))
 
   private def withStores[A](postgres: PostgreSQLContainer)(
       f: (PaymentStore[IO], PaymentMethod) => IO[A]
@@ -721,6 +721,42 @@ class PaymentStorePostgresSuite
             ),
             List("authorized")
           )
+        }
+      }
+    }
+  }
+
+  test("create rejects a second payment for the same order") {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      val config = configFor(postgres)
+      Migrations.run[IO](config) *> PaymentStore
+        .postgres[IO](config, Meter.noop[IO])
+        .use { store =>
+          for {
+            _ <- store.create(orderId, 4999)
+            result <- store.create(orderId, 4999).attempt
+          } yield assertEquals(result, Left(PaymentAlreadyExists(orderId)))
+        }
+    }
+  }
+
+  test("recordCapture leaves an expired authorization untouched") {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store.recordAuthorization(
+            orderId,
+            4999,
+            method.id,
+            Authorization("auth-x", Instant.parse("2020-01-01T00:00:00Z"))
+          )
+          result <- store.recordCapture(orderId)
+          after <- store.findByOrderId(orderId)
+        } yield {
+          assertEquals(result, None)
+          assertEquals(after.map(_.status), Some(PaymentStatus.Authorized))
         }
       }
     }

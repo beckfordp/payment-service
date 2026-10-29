@@ -11,7 +11,7 @@ import paymentservice.domain.PaymentMethodId
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.log4cats.testing.StructuredTestingLogger
-import org.typelevel.log4cats.testing.StructuredTestingLogger.INFO
+import org.typelevel.log4cats.testing.StructuredTestingLogger.WARN
 import org.typelevel.otel4s.metrics.Meter
 import purekafka.consumer.DeadLetter
 import purekafka.resilience.{
@@ -130,7 +130,7 @@ class FulfilmentEventConsumerSuite
       .timeout(15.seconds)
 
   private val authorization =
-    Authorization("auth-1", Instant.parse("2026-11-03T12:00:00Z"))
+    Authorization("auth-1", Instant.parse("2099-11-03T12:00:00Z"))
 
   private val address = Address("1 High St", None, "London", "SW1A 1AA", "GB")
 
@@ -142,7 +142,7 @@ class FulfilmentEventConsumerSuite
     )
 
   test(
-    "an unrelated event type is logged and skipped, and raw payloads are not logged"
+    "an unknown event type is logged and dead-lettered, and raw payloads are not logged"
   ) {
     withContainers { kafka =>
       val config = configFor(kafka)
@@ -179,10 +179,10 @@ class FulfilmentEventConsumerSuite
           .use(_ => IO.sleep(3.seconds))
         logged <- logger.logged
       } yield {
-        val infos = logged.collect { case m: INFO => m }
+        val warns = logged.collect { case m: WARN => m }
         assert(
-          infos.exists(_.ctx.get("event_type").contains("PaymentAuthorized")),
-          s"expected an ignored-event info line, got: $infos"
+          warns.exists(_.ctx.get("event_type").contains("PaymentAuthorized")),
+          s"expected an unknown-event warn line, got: $warns"
         )
         assert(
           logged.forall(m => !m.ctx.contains("raw")),
