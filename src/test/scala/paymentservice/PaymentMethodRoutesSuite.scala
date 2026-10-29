@@ -4,6 +4,7 @@ import cats.effect.IO
 import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
+import paymentservice.domain.PaymentMethodId
 import org.http4s.circe.CirceEntityCodec._
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Response, Status}
@@ -35,7 +36,7 @@ class PaymentMethodRoutesSuite extends CatsEffectSuite {
       store <- PaymentMethodStore.inMemory[IO]
       response <- post(store, validRequest)
       body <- response.as[PaymentMethodResponse]
-      stored <- store.get(body.id)
+      stored <- store.get(PaymentMethodId.parse(body.id).toOption.get)
     } yield {
       assertEquals(response.status, Status.Created)
       assertEquals(body.last4, "4242")
@@ -109,7 +110,8 @@ class PaymentMethodRoutesSuite extends CatsEffectSuite {
       recording = new PaymentMethodStore[IO] {
         def create(c: String, card: Card, a: Address): IO[PaymentMethod] =
           IO.raiseError(new AssertionError("create must not be called"))
-        def get(id: String): IO[Option[PaymentMethod]] = store.get(id)
+        def get(id: PaymentMethodId): IO[Option[PaymentMethod]] =
+          store.get(id)
       }
       response <- post(recording, validRequest.copy(cardNumber = "1"))
     } yield assertEquals(response.status, Status.BadRequest)

@@ -2,6 +2,7 @@ package paymentservice
 
 import cats.effect.IO
 import munit.CatsEffectSuite
+import paymentservice.domain.{PaymentId, PaymentMethodId}
 import org.http4s.circe.CirceEntityCodec._
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Status}
@@ -16,30 +17,32 @@ import purerest.tracing.{ServerTracing, Tracing}
 
 class PaymentRoutesSuite extends CatsEffectSuite {
 
+  private val unknownPaymentId = java.util.UUID.randomUUID().toString
+
   private def failingStore(error: Throwable): PaymentStore[IO] =
     new PaymentStore[IO] {
       def create(orderId: String, amountCents: Int): IO[Payment] =
         IO.raiseError(error)
-      def get(id: String): IO[Option[Payment]] = IO.pure(None)
+      def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def update(
-          id: String,
+          id: PaymentId,
           status: PaymentStatus
       ): IO[Option[Payment]] =
         IO.raiseError(error)
-      def delete(id: String): IO[Boolean] = IO.raiseError(error)
+      def delete(id: PaymentId): IO[Boolean] = IO.raiseError(error)
       def ping: IO[Boolean] = IO.raiseError(error)
       def findByOrderId(orderId: String): IO[Option[Payment]] =
         IO.raiseError(error)
       def recordAuthorization(
           orderId: String,
           amountCents: Int,
-          paymentMethodId: String,
+          paymentMethodId: PaymentMethodId,
           authorization: Authorization
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordDecline(
           orderId: String,
           amountCents: Int,
-          paymentMethodId: String,
+          paymentMethodId: PaymentMethodId,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordCapture(orderId: String): IO[Option[Payment]] =
@@ -93,7 +96,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       store <- PaymentStore.inMemory[IO]
       routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
       response <- routes.orNotFound.run(
-        Request[IO](Method.GET, uri"/payments" / "unknown-id")
+        Request[IO](Method.GET, uri"/payments" / unknownPaymentId)
       )
       body <- response.as[io.circe.Json]
     } yield {
@@ -161,6 +164,16 @@ class PaymentRoutesSuite extends CatsEffectSuite {
     }
   }
 
+  test("GET /payments/{id} returns 400 for a malformed (non-UUID) id") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
+      response <- routes.orNotFound.run(
+        Request[IO](Method.GET, uri"/payments" / "not-a-uuid")
+      )
+    } yield assertEquals(response.status, Status.BadRequest)
+  }
+
   test(
     "GET /payments/{id} logs a received-request line and a completed line for a found entity"
   ) {
@@ -208,7 +221,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       testLogger = StructuredTestingLogger.impl[IO]()
       routes = PaymentRoutes.routes[IO](store, testLogger)
       response <- routes.orNotFound.run(
-        Request[IO](Method.GET, uri"/payments" / "unknown-id")
+        Request[IO](Method.GET, uri"/payments" / unknownPaymentId)
       )
       logged <- testLogger.logged
     } yield {
@@ -217,7 +230,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       assert(
         warns.exists(m =>
           m.message.toLowerCase.contains("not found") &&
-            m.ctx.get("payment_id").contains("unknown-id")
+            m.ctx.get("payment_id").contains(unknownPaymentId)
         ),
         s"expected a 'not found' WARN line with id context, got: $warns"
       )
@@ -342,7 +355,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       store <- PaymentStore.inMemory[IO]
       routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
       response <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / "unknown-id")
+        Request[IO](Method.PATCH, uri"/payments" / unknownPaymentId)
           .withEntity(UpdatePaymentRequest("pending"))
       )
       body <- response.as[io.circe.Json]
@@ -401,7 +414,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       testLogger = StructuredTestingLogger.impl[IO]()
       routes = PaymentRoutes.routes[IO](store, testLogger)
       response <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / "unknown-id")
+        Request[IO](Method.PATCH, uri"/payments" / unknownPaymentId)
           .withEntity(UpdatePaymentRequest("pending"))
       )
       logged <- testLogger.logged
@@ -411,7 +424,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       assert(
         warns.exists(m =>
           m.message.toLowerCase.contains("not found") &&
-            m.ctx.get("payment_id").contains("unknown-id")
+            m.ctx.get("payment_id").contains(unknownPaymentId)
         ),
         s"expected a 'not found' WARN line with id context, got: $warns"
       )
@@ -449,7 +462,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       store <- PaymentStore.inMemory[IO]
       routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
       response <- routes.orNotFound.run(
-        Request[IO](Method.DELETE, uri"/payments" / "unknown-id")
+        Request[IO](Method.DELETE, uri"/payments" / unknownPaymentId)
       )
       body <- response.as[io.circe.Json]
     } yield {
@@ -506,7 +519,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       testLogger = StructuredTestingLogger.impl[IO]()
       routes = PaymentRoutes.routes[IO](store, testLogger)
       response <- routes.orNotFound.run(
-        Request[IO](Method.DELETE, uri"/payments" / "unknown-id")
+        Request[IO](Method.DELETE, uri"/payments" / unknownPaymentId)
       )
       logged <- testLogger.logged
     } yield {
@@ -515,7 +528,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       assert(
         warns.exists(m =>
           m.message.toLowerCase.contains("not found") &&
-            m.ctx.get("payment_id").contains("unknown-id")
+            m.ctx.get("payment_id").contains(unknownPaymentId)
         ),
         s"expected a 'not found' WARN line with id context, got: $warns"
       )
@@ -550,7 +563,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       store <- PaymentStore.inMemory[IO]
       routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
       response <- routes.orNotFound.run(
-        Request[IO](Method.PUT, uri"/payments" / "unknown-id")
+        Request[IO](Method.PUT, uri"/payments" / unknownPaymentId)
           .withEntity(UpdatePaymentRequest("pending"))
       )
       body <- response.as[io.circe.Json]

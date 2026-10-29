@@ -118,7 +118,10 @@ object FulfilmentEventConsumer {
                         )("Authorization voided")
                       case None =>
                         logger.warn(
-                          Map("payment_id" -> payment.id)
+                          Map(
+                            "payment_id" -> paymentservice.domain.PaymentId
+                              .render(payment.id)
+                          )
                         )("Voided payment disappeared before the status update")
                     }
               }

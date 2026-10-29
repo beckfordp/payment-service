@@ -5,6 +5,9 @@ import cats.syntax.all._
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
 import munit.CatsEffectSuite
+import paymentservice.domain.{PaymentId, PaymentMethodId}
+
+import java.util.UUID
 import org.testcontainers.utility.DockerImageName
 import org.typelevel.otel4s.metrics.Meter
 import purerest.metrics.Metrics
@@ -38,7 +41,7 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           store.create("order-create", 4999).map { entity =>
-            assert(entity.id.nonEmpty)
+            assert(PaymentId.render(entity.id).nonEmpty)
           }
         }
     }
@@ -83,19 +86,8 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           store
-            .get(java.util.UUID.randomUUID().toString)
+            .get(PaymentId.fromUuid(UUID.randomUUID()))
             .map(assertEquals(_, None))
-        }
-    }
-  }
-
-  test("get returns None for a malformed (non-UUID) id") {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          store.get("not-a-uuid").map(assertEquals(_, None))
         }
     }
   }
@@ -130,7 +122,10 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           store
-            .update(java.util.UUID.randomUUID().toString, PaymentStatus.Pending)
+            .update(
+              PaymentId.fromUuid(UUID.randomUUID()),
+              PaymentStatus.Pending
+            )
             .map(assertEquals(_, None))
         }
     }
@@ -228,29 +223,16 @@ class PaymentStorePostgresSuite
       Migrations.run[IO](config) *> PaymentStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
-          val unknownId = java.util.UUID.randomUUID().toString
+          val unknownId = PaymentId.fromUuid(UUID.randomUUID())
           store
             .update(unknownId, PaymentStatus.Captured)
             .map { result =>
               assertEquals(result, None)
               assertEquals(
-                outboxRowsForOrder(postgres, unknownId),
+                outboxRowsForOrder(postgres, PaymentId.render(unknownId)),
                 Nil
               )
             }
-        }
-    }
-  }
-
-  test("update returns None for a malformed (non-UUID) id") {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          store
-            .update("not-a-uuid", PaymentStatus.Pending)
-            .map(assertEquals(_, None))
         }
     }
   }
@@ -285,19 +267,8 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           store
-            .delete(java.util.UUID.randomUUID().toString)
+            .delete(PaymentId.fromUuid(UUID.randomUUID()))
             .map(deleted => assert(!deleted))
-        }
-    }
-  }
-
-  test("delete returns false for a malformed (non-UUID) id") {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          store.delete("not-a-uuid").map(deleted => assert(!deleted))
         }
     }
   }

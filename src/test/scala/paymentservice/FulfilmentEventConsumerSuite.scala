@@ -7,6 +7,7 @@ import fs2.kafka._
 import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
+import paymentservice.domain.PaymentMethodId
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.otel4s.metrics.Meter
 import purekafka.consumer.DeadLetter
@@ -145,7 +146,12 @@ class FulfilmentEventConsumerSuite
         methods <- PaymentMethodStore.inMemory[IO]
         s <- spy()
         orderId = UUID.randomUUID().toString
-        _ <- store.recordAuthorization(orderId, 4999, "pm-1", authorization)
+        _ <- store.recordAuthorization(
+          orderId,
+          4999,
+          PaymentMethodId.fromUuid(java.util.UUID.randomUUID()),
+          authorization
+        )
         event = DispatchFailedEvent(orderId, "damaged")
         _ <- produce(
           config,

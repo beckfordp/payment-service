@@ -41,7 +41,7 @@ object PaymentMethodResponse {
 
   def apply(method: PaymentMethod): PaymentMethodResponse =
     PaymentMethodResponse(
-      method.id,
+      paymentservice.domain.PaymentMethodId.render(method.id),
       method.last4,
       method.brand.asString,
       method.expiry
@@ -125,7 +125,12 @@ object PaymentMethodRoutes {
               }
               .flatMap { method =>
                 logger
-                  .info(context + ("payment_method_id" -> method.id))(
+                  .info(
+                    context + (
+                      "payment_method_id" -> paymentservice.domain.PaymentMethodId
+                        .render(method.id)
+                    )
+                  )(
                     "Request completed"
                   )
                   .as(Right(PaymentMethodResponse(method)))

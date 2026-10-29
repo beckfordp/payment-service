@@ -4,6 +4,9 @@ import cats.effect.IO
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
 import munit.CatsEffectSuite
+import paymentservice.domain.PaymentMethodId
+
+import java.util.UUID
 import org.testcontainers.utility.DockerImageName
 import org.typelevel.otel4s.metrics.Meter
 
@@ -48,19 +51,15 @@ class PaymentMethodStorePostgresSuite
     }
   }
 
-  test("get returns None for an unknown or malformed id") {
+  test("get returns None for an unknown id") {
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentMethodStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
-          for {
-            unknown <- store.get("3fa85f64-5717-4562-b3fc-2c963f66afa6")
-            malformed <- store.get("not-a-uuid")
-          } yield {
-            assertEquals(unknown, None)
-            assertEquals(malformed, None)
-          }
+          store
+            .get(PaymentMethodId.fromUuid(UUID.randomUUID()))
+            .map(assertEquals(_, None))
         }
     }
   }

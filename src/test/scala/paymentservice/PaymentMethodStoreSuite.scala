@@ -2,6 +2,9 @@ package paymentservice
 
 import cats.effect.IO
 import munit.CatsEffectSuite
+import paymentservice.domain.PaymentMethodId
+
+import java.util.UUID
 
 class PaymentMethodStoreSuite extends CatsEffectSuite {
 
@@ -14,7 +17,7 @@ class PaymentMethodStoreSuite extends CatsEffectSuite {
       store <- PaymentMethodStore.inMemory[IO]
       method <- store.create("customer-1", card, billing)
     } yield {
-      assert(method.id.nonEmpty)
+      assert(PaymentMethodId.render(method.id).nonEmpty)
       assertEquals(method.customerId, "customer-1")
       assertEquals(method.cardToken, "tok_visa_4242")
       assertEquals(method.last4, "4242")
@@ -35,7 +38,7 @@ class PaymentMethodStoreSuite extends CatsEffectSuite {
   test("get returns None for an unknown id") {
     PaymentMethodStore
       .inMemory[IO]
-      .flatMap(_.get("unknown"))
+      .flatMap(_.get(PaymentMethodId.fromUuid(UUID.randomUUID())))
       .assertEquals(None)
   }
 

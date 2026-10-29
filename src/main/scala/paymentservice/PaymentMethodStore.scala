@@ -4,6 +4,7 @@ import cats.effect.{Async, Ref, Resource, Sync}
 import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
+import paymentservice.domain.PaymentMethodId
 import org.typelevel.otel4s.metrics.Meter
 import skunk.{Codec, Session}
 import skunk.circe.codec.all.jsonb
@@ -18,7 +19,7 @@ import java.util.UUID
   * passes that id to `POST /payments/authorize`.
   */
 final case class PaymentMethod(
-    id: String,
+    id: PaymentMethodId,
     customerId: String,
     cardToken: String,
     last4: String,
@@ -34,13 +35,13 @@ trait PaymentMethodStore[F[_]] {
       card: Card,
       billingAddress: Address
   ): F[PaymentMethod]
-  def get(id: String): F[Option[PaymentMethod]]
+  def get(id: PaymentMethodId): F[Option[PaymentMethod]]
 }
 
 object PaymentMethodStore {
 
   def inMemory[F[_]: Sync]: F[PaymentMethodStore[F]] =
-    Ref.of[F, Map[String, PaymentMethod]](Map.empty).map { ref =>
+    Ref.of[F, Map[PaymentMethodId, PaymentMethod]](Map.empty).map { ref =>
       new PaymentMethodStore[F] {
         def create(
             customerId: String,
@@ -48,18 +49,21 @@ object PaymentMethodStore {
             billingAddress: Address
         ): F[PaymentMethod] =
           for {
-            id <- Sync[F].delay(UUID.randomUUID().toString)
+            id <- Sync[F].delay(
+              PaymentMethodId.fromUuid(UUID.randomUUID())
+            )
             now <- Sync[F].realTimeInstant
             method = fromCard(id, customerId, card, billingAddress, now)
             _ <- ref.update(_ + (id -> method))
           } yield method
 
-        def get(id: String): F[Option[PaymentMethod]] = ref.get.map(_.get(id))
+        def get(id: PaymentMethodId): F[Option[PaymentMethod]] =
+          ref.get.map(_.get(id))
       }
     }
 
   private def fromCard(
-      id: String,
+      id: PaymentMethodId,
       customerId: String,
       card: Card,
       billingAddress: Address,
@@ -146,43 +150,42 @@ object PaymentMethodStore {
                   }
                 }
               } yield fromCard(
-                id.toString,
+                PaymentMethodId.fromUuid(id),
                 customerId,
                 card,
                 billingAddress,
                 createdAt.toInstant
               )
 
-            def get(id: String): F[Option[PaymentMethod]] =
-              scala.util.Try(UUID.fromString(id)).toOption match {
-                case None       => Sync[F].pure(None)
-                case Some(uuid) =>
-                  timer
-                    .timed("select") {
-                      pool.use(_.prepare(selectMethod).flatMap(_.option(uuid)))
-                    }
-                    .map(_.map {
-                      case (
-                            customerId,
-                            cardToken,
-                            last4,
-                            brand,
-                            expiry,
-                            billingAddress,
-                            createdAt
-                          ) =>
-                        PaymentMethod(
-                          id,
-                          customerId,
-                          cardToken,
-                          last4,
-                          brand,
-                          expiry,
-                          billingAddress,
-                          createdAt.toInstant
-                        )
-                    })
-              }
+            def get(id: PaymentMethodId): F[Option[PaymentMethod]] =
+              timer
+                .timed("select") {
+                  pool.use(
+                    _.prepare(selectMethod)
+                      .flatMap(_.option(PaymentMethodId.uuid(id)))
+                  )
+                }
+                .map(_.map {
+                  case (
+                        customerId,
+                        cardToken,
+                        last4,
+                        brand,
+                        expiry,
+                        billingAddress,
+                        createdAt
+                      ) =>
+                    PaymentMethod(
+                      id,
+                      customerId,
+                      cardToken,
+                      last4,
+                      brand,
+                      expiry,
+                      billingAddress,
+                      createdAt.toInstant
+                    )
+                })
           }
         }
       }

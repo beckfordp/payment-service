@@ -4,6 +4,7 @@ import cats.effect.{Async, Ref, Resource, Sync}
 import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
+import paymentservice.domain.{PaymentId, PaymentMethodId}
 import io.circe.syntax._
 import org.typelevel.otel4s.metrics.Meter
 import skunk.{Codec, Session}
@@ -20,13 +21,13 @@ import java.util.UUID
   * CRUD routes leave them empty.
   */
 final case class Payment(
-    id: String,
+    id: PaymentId,
     orderId: String,
     amountCents: Int,
     status: PaymentStatus,
     createdAt: Instant,
     updatedAt: Instant,
-    paymentMethodId: Option[String] = None,
+    paymentMethodId: Option[PaymentMethodId] = None,
     authId: Option[String] = None,
     expiresAt: Option[Instant] = None,
     declineReason: Option[String] = None
@@ -34,9 +35,9 @@ final case class Payment(
 
 trait PaymentStore[F[_]] {
   def create(orderId: String, amountCents: Int): F[Payment]
-  def get(id: String): F[Option[Payment]]
-  def update(id: String, status: PaymentStatus): F[Option[Payment]]
-  def delete(id: String): F[Boolean]
+  def get(id: PaymentId): F[Option[Payment]]
+  def update(id: PaymentId, status: PaymentStatus): F[Option[Payment]]
+  def delete(id: PaymentId): F[Boolean]
   def ping: F[Boolean]
 
   /** The single payment row for an order (TD-10.1) — used by
@@ -53,7 +54,7 @@ trait PaymentStore[F[_]] {
   def recordAuthorization(
       orderId: String,
       amountCents: Int,
-      paymentMethodId: String,
+      paymentMethodId: PaymentMethodId,
       authorization: Authorization
   ): F[Option[Payment]]
 
@@ -64,7 +65,7 @@ trait PaymentStore[F[_]] {
   def recordDecline(
       orderId: String,
       amountCents: Int,
-      paymentMethodId: String,
+      paymentMethodId: PaymentMethodId,
       reason: DeclineReason
   ): F[Option[Payment]]
 
@@ -147,7 +148,7 @@ object PaymentStore {
       correlationId = payment.orderId,
       payload = PaymentFailedEvent(
         payment.orderId,
-        payment.id,
+        PaymentId.render(payment.id),
         payment.amountCents,
         reason,
         timestamp
@@ -170,7 +171,7 @@ object PaymentStore {
   def inMemoryWithOutbox[F[_]: Sync]
       : F[(PaymentStore[F], Ref[F, List[(String, EventEnvelope)]])] =
     for {
-      ref <- Ref.of[F, Map[String, Payment]](Map.empty)
+      ref <- Ref.of[F, Map[PaymentId, Payment]](Map.empty)
       outboxRef <- Ref.of[F, List[(String, EventEnvelope)]](Nil)
     } yield {
       def insert(
@@ -180,7 +181,7 @@ object PaymentStore {
           fill: Payment => Payment
       ): F[Payment] =
         for {
-          id <- Sync[F].delay(java.util.UUID.randomUUID().toString)
+          id <- Sync[F].delay(PaymentId.fromUuid(java.util.UUID.randomUUID()))
           now <- Sync[F].realTimeInstant
           entity = fill(Payment(id, orderId, amountCents, status, now, now))
           _ <- ref.update(_ + (id -> entity))
@@ -190,10 +191,10 @@ object PaymentStore {
         def create(orderId: String, amountCents: Int): F[Payment] =
           insert(orderId, amountCents, defaultStatus, identity)
 
-        def get(id: String): F[Option[Payment]] = ref.get.map(_.get(id))
+        def get(id: PaymentId): F[Option[Payment]] = ref.get.map(_.get(id))
 
         def update(
-            id: String,
+            id: PaymentId,
             status: PaymentStatus
         ): F[Option[Payment]] =
           for {
@@ -212,7 +213,7 @@ object PaymentStore {
             }
           } yield updated
 
-        def delete(id: String): F[Boolean] =
+        def delete(id: PaymentId): F[Boolean] =
           ref.modify { entities =>
             if (entities.contains(id)) (entities - id, true)
             else (entities, false)
@@ -226,7 +227,7 @@ object PaymentStore {
         def recordAuthorization(
             orderId: String,
             amountCents: Int,
-            paymentMethodId: String,
+            paymentMethodId: PaymentMethodId,
             authorization: Authorization
         ): F[Option[Payment]] =
           findByOrderId(orderId).flatMap {
@@ -251,7 +252,7 @@ object PaymentStore {
         def recordDecline(
             orderId: String,
             amountCents: Int,
-            paymentMethodId: String,
+            paymentMethodId: PaymentMethodId,
             reason: DeclineReason
         ): F[Option[Payment]] =
           findByOrderId(orderId).flatMap {
@@ -331,7 +332,7 @@ object PaymentStore {
     text *: int4 *: paymentStatus *: timestamptz *: timestamptz *:
       uuid.opt *: text.opt *: timestamptz.opt *: text.opt
 
-  private def toPayment(id: String, row: PaymentRow): Payment = {
+  private def toPayment(id: PaymentId, row: PaymentRow): Payment = {
     val (
       orderId,
       amountCents,
@@ -350,7 +351,7 @@ object PaymentStore {
       status,
       createdAt.toInstant,
       updatedAt.toInstant,
-      paymentMethodId.map(_.toString),
+      paymentMethodId.map(PaymentMethodId.fromUuid),
       authId,
       expiresAt.map(_.toInstant),
       declineReason
@@ -508,7 +509,7 @@ object PaymentStore {
                 orderId: String,
                 amountCents: Int,
                 status: PaymentStatus,
-                paymentMethodId: String,
+                paymentMethodId: PaymentMethodId,
                 authId: Option[String],
                 expiresAt: Option[Instant],
                 declineReason: Option[String],
@@ -516,7 +517,7 @@ object PaymentStore {
             ): F[Option[Payment]] =
               for {
                 id <- Sync[F].delay(UUID.randomUUID())
-                methodId <- Sync[F].delay(UUID.fromString(paymentMethodId))
+                methodId = PaymentMethodId.uuid(paymentMethodId)
                 row <- timed("insert") {
                   pool.use { session =>
                     session.transaction.use { _ =>
@@ -563,7 +564,7 @@ object PaymentStore {
                     }
                   }
                 }
-              } yield row.map(toPayment(id.toString, _))
+              } yield row.map(toPayment(PaymentId.fromUuid(id), _))
 
             new PaymentStore[F] {
               def create(orderId: String, amountCents: Int): F[Payment] =
@@ -581,7 +582,7 @@ object PaymentStore {
                 } yield {
                   val (createdAt, updatedAt) = timestamps
                   Payment(
-                    id.toString,
+                    PaymentId.fromUuid(id),
                     orderId,
                     amountCents,
                     defaultStatus,
@@ -590,45 +591,35 @@ object PaymentStore {
                   )
                 }
 
-              def get(id: String): F[Option[Payment]] =
-                scala.util.Try(UUID.fromString(id)).toOption match {
-                  case None       => Sync[F].pure(None)
-                  case Some(uuid) =>
-                    timed("select") {
-                      pool.use { session =>
-                        session.prepare(selectPayment).flatMap(_.option(uuid))
-                      }
-                    }.map(_.map(toPayment(id, _)))
-                }
+              def get(id: PaymentId): F[Option[Payment]] =
+                timed("select") {
+                  pool.use { session =>
+                    session
+                      .prepare(selectPayment)
+                      .flatMap(_.option(PaymentId.uuid(id)))
+                  }
+                }.map(_.map(toPayment(id, _)))
 
               def update(
-                  id: String,
+                  id: PaymentId,
                   status: PaymentStatus
               ): F[Option[Payment]] =
-                scala.util.Try(UUID.fromString(id)).toOption match {
-                  case None       => Sync[F].pure(None)
-                  case Some(uuid) =>
-                    timed("update") {
-                      pool.use { session =>
-                        session
-                          .prepare(updatePayment)
-                          .flatMap(_.option((status, uuid)))
-                      }
-                    }.map(_.map(toPayment(id, _)))
-                }
+                timed("update") {
+                  pool.use { session =>
+                    session
+                      .prepare(updatePayment)
+                      .flatMap(_.option((status, PaymentId.uuid(id))))
+                  }
+                }.map(_.map(toPayment(id, _)))
 
-              def delete(id: String): F[Boolean] =
-                scala.util.Try(UUID.fromString(id)).toOption match {
-                  case None       => Sync[F].pure(false)
-                  case Some(uuid) =>
-                    timed("delete") {
-                      pool.use { session =>
-                        session
-                          .prepare(deletePayment)
-                          .flatMap(_.option(uuid))
-                          .map(_.isDefined)
-                      }
-                    }
+              def delete(id: PaymentId): F[Boolean] =
+                timed("delete") {
+                  pool.use { session =>
+                    session
+                      .prepare(deletePayment)
+                      .flatMap(_.option(PaymentId.uuid(id)))
+                      .map(_.isDefined)
+                  }
                 }
 
               def ping: F[Boolean] =
@@ -643,12 +634,14 @@ object PaymentStore {
                       .prepare(selectPaymentByOrderId)
                       .flatMap(_.option(orderId))
                   }
-                }.map(_.map { case (id, row) => toPayment(id.toString, row) })
+                }.map(_.map { case (id, row) =>
+                  toPayment(PaymentId.fromUuid(id), row)
+                })
 
               def recordAuthorization(
                   orderId: String,
                   amountCents: Int,
-                  paymentMethodId: String,
+                  paymentMethodId: PaymentMethodId,
                   authorization: Authorization
               ): F[Option[Payment]] =
                 authorizedEnvelope[F](orderId, authorization).flatMap {
@@ -668,7 +661,7 @@ object PaymentStore {
               def recordDecline(
                   orderId: String,
                   amountCents: Int,
-                  paymentMethodId: String,
+                  paymentMethodId: PaymentMethodId,
                   reason: DeclineReason
               ): F[Option[Payment]] =
                 insertOutcome(
@@ -697,7 +690,7 @@ object PaymentStore {
                         .flatMap {
                           case None            => Sync[F].pure(None)
                           case Some((id, row)) =>
-                            val payment = toPayment(id.toString, row)
+                            val payment = toPayment(PaymentId.fromUuid(id), row)
                             for {
                               event <- envelope(payment)
                               outboxId <- Sync[F].delay(UUID.randomUUID())

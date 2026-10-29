@@ -4,6 +4,7 @@ import cats.effect.Async
 import cats.syntax.all._
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
+import paymentservice.domain.PaymentId
 import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
@@ -39,7 +40,7 @@ object PaymentResponse {
 
   def apply(entity: Payment): PaymentResponse =
     PaymentResponse(
-      entity.id,
+      PaymentId.render(entity.id),
       entity.orderId,
       entity.amountCents,
       entity.status.asString,
@@ -91,44 +92,44 @@ object PaymentRoutes {
     oneOf[PaymentError](notFoundVariant, invalidStatusVariant)
 
   private val getPaymentEndpoint: PublicEndpoint[
-    String,
+    PaymentId,
     PaymentError,
     PaymentResponse,
     Any
   ] =
     endpoint.get
-      .in("payments" / path[String]("id"))
+      .in("payments" / path[PaymentId]("id"))
       .out(jsonBody[PaymentResponse])
       .errorOut(paymentErrorOutput)
 
   private val updatePaymentEndpoint: PublicEndpoint[
-    (String, UpdatePaymentRequest),
+    (PaymentId, UpdatePaymentRequest),
     PaymentError,
     PaymentResponse,
     Any
   ] =
     endpoint.patch
-      .in("payments" / path[String]("id"))
+      .in("payments" / path[PaymentId]("id"))
       .in(jsonBody[UpdatePaymentRequest])
       .out(jsonBody[PaymentResponse])
       .errorOut(paymentErrorOutput)
 
   private val replacePaymentEndpoint: PublicEndpoint[
-    (String, UpdatePaymentRequest),
+    (PaymentId, UpdatePaymentRequest),
     PaymentError,
     PaymentResponse,
     Any
   ] =
     endpoint.put
-      .in("payments" / path[String]("id"))
+      .in("payments" / path[PaymentId]("id"))
       .in(jsonBody[UpdatePaymentRequest])
       .out(jsonBody[PaymentResponse])
       .errorOut(paymentErrorOutput)
 
   private val deletePaymentEndpoint
-      : PublicEndpoint[String, PaymentError, Unit, Any] =
+      : PublicEndpoint[PaymentId, PaymentError, Unit, Any] =
     endpoint.delete
-      .in("payments" / path[String]("id"))
+      .in("payments" / path[PaymentId]("id"))
       .out(statusCode(StatusCode.NoContent))
       .errorOut(paymentErrorOutput)
 
@@ -149,7 +150,7 @@ object PaymentRoutes {
             logger.error(Map.empty, error)("Persisting the payment failed")
         }
         _ <- logger.info(
-          Map("payment_id" -> entity.id)
+          Map("payment_id" -> PaymentId.render(entity.id))
         )("Request completed")
       } yield PaymentResponse(entity)
     }
@@ -159,20 +160,23 @@ object PaymentRoutes {
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
     getPaymentEndpoint.serverLogic[F] { id =>
+      val renderedId = PaymentId.render(id)
       for {
         _ <- logger.info(
-          Map("method" -> "GET", "path" -> s"/payments/$id", "payment_id" -> id)
-        )(
-          "Received request"
-        )
+          Map(
+            "method" -> "GET",
+            "path" -> s"/payments/$renderedId",
+            "payment_id" -> renderedId
+          )
+        )("Received request")
         result <- store.get(id).flatMap {
           case Some(entity) =>
             logger
-              .info(Map("payment_id" -> id))("Request completed")
+              .info(Map("payment_id" -> renderedId))("Request completed")
               .as(Right(PaymentResponse(entity)))
           case None =>
             logger
-              .warn(Map("payment_id" -> id))("Payment not found")
+              .warn(Map("payment_id" -> renderedId))("Payment not found")
               .as(Left(PaymentNotFound))
         }
       } yield result
@@ -187,21 +191,22 @@ object PaymentRoutes {
       logger: StructuredLogger[F],
       httpMethod: String
   )(
-      id: String,
+      id: PaymentId,
       req: UpdatePaymentRequest
-  ): F[Either[PaymentError, PaymentResponse]] =
+  ): F[Either[PaymentError, PaymentResponse]] = {
+    val renderedId = PaymentId.render(id)
     for {
       _ <- logger.info(
         Map(
           "method" -> httpMethod,
-          "path" -> s"/payments/$id",
-          "payment_id" -> id
+          "path" -> s"/payments/$renderedId",
+          "payment_id" -> renderedId
         )
       )("Received request")
       result <- PaymentStatus.fromString(req.status) match {
         case Left(_) =>
           logger
-            .warn(Map("payment_id" -> id, "status" -> req.status))(
+            .warn(Map("payment_id" -> renderedId, "status" -> req.status))(
               "Invalid status"
             )
             .as(Left(InvalidStatus(req.status)))
@@ -209,15 +214,16 @@ object PaymentRoutes {
           store.update(id, status).flatMap {
             case Some(entity) =>
               logger
-                .info(Map("payment_id" -> id))("Request completed")
+                .info(Map("payment_id" -> renderedId))("Request completed")
                 .as(Right(PaymentResponse(entity)))
             case None =>
               logger
-                .warn(Map("payment_id" -> id))("Payment not found")
+                .warn(Map("payment_id" -> renderedId))("Payment not found")
                 .as(Left(PaymentNotFound))
           }
       }
     } yield result
+  }
 
   def updatePaymentServerEndpoint[F[_]: Async](
       store: PaymentStore[F],
@@ -240,22 +246,23 @@ object PaymentRoutes {
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
     deletePaymentEndpoint.serverLogic[F] { id =>
+      val renderedId = PaymentId.render(id)
       for {
         _ <- logger.info(
           Map(
             "method" -> "DELETE",
-            "path" -> s"/payments/$id",
-            "payment_id" -> id
+            "path" -> s"/payments/$renderedId",
+            "payment_id" -> renderedId
           )
         )("Received request")
         result <- store.delete(id).flatMap {
           case true =>
             logger
-              .info(Map("payment_id" -> id))("Request completed")
+              .info(Map("payment_id" -> renderedId))("Request completed")
               .as(Right(()))
           case false =>
             logger
-              .warn(Map("payment_id" -> id))("Payment not found")
+              .warn(Map("payment_id" -> renderedId))("Payment not found")
               .as(Left(PaymentNotFound))
         }
       } yield result

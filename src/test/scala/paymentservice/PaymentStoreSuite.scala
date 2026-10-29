@@ -2,16 +2,23 @@ package paymentservice
 
 import cats.effect.IO
 import munit.CatsEffectSuite
+import paymentservice.domain.{PaymentId, PaymentMethodId}
 
 import java.time.Instant
+import java.util.UUID
 
 class PaymentStoreSuite extends CatsEffectSuite {
+
+  private val paymentMethodId =
+    PaymentMethodId.fromUuid(UUID.randomUUID())
+  private def unknownPaymentId: PaymentId =
+    PaymentId.fromUuid(UUID.randomUUID())
 
   test("create returns a persisted entity with a generated id") {
     for {
       store <- PaymentStore.inMemory[IO]
       entity <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-    } yield assert(entity.id.nonEmpty)
+    } yield assert(PaymentId.render(entity.id).nonEmpty)
   }
 
   test("get returns the persisted entity") {
@@ -25,7 +32,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("get returns None for an unknown id") {
     for {
       store <- PaymentStore.inMemory[IO]
-      found <- store.get("unknown-id")
+      found <- store.get(unknownPaymentId)
     } yield assertEquals(found, None)
   }
 
@@ -56,7 +63,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("update returns None for an unknown id") {
     for {
       store <- PaymentStore.inMemory[IO]
-      result <- store.update("unknown-id", PaymentStatus.Pending)
+      result <- store.update(unknownPaymentId, PaymentStatus.Pending)
     } yield assertEquals(result, None)
   }
 
@@ -77,7 +84,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("delete returns false for an unknown id") {
     for {
       store <- PaymentStore.inMemory[IO]
-      deleted <- store.delete("unknown-id")
+      deleted <- store.delete(unknownPaymentId)
     } yield assert(!deleted)
   }
 
@@ -93,7 +100,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
         .recordAuthorization(
           "order-1",
           4999,
-          "pm-1",
+          paymentMethodId,
           authorization
         )
         .map(_.getOrElse(fail("expected the authorization to be inserted")))
@@ -101,7 +108,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
       events <- outbox.get
     } yield {
       assertEquals(payment.status, PaymentStatus.Authorized)
-      assertEquals(payment.paymentMethodId, Some("pm-1"))
+      assertEquals(payment.paymentMethodId, Some(paymentMethodId))
       assertEquals(payment.authId, Some("auth_1"))
       assertEquals(payment.expiresAt, Some(authorization.expiresAt))
       assertEquals(payment.declineReason, None)
@@ -128,7 +135,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
         .recordDecline(
           "order-1",
           4999,
-          "pm-1",
+          paymentMethodId,
           DeclineReason("insufficient_funds")
         )
         .map(_.getOrElse(fail("expected the decline to be inserted")))
@@ -136,7 +143,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
       events <- outbox.get
     } yield {
       assertEquals(payment.status, PaymentStatus.Failed)
-      assertEquals(payment.paymentMethodId, Some("pm-1"))
+      assertEquals(payment.paymentMethodId, Some(paymentMethodId))
       assertEquals(payment.declineReason, Some("insufficient_funds"))
       assertEquals(payment.authId, None)
       assertEquals(found, Some(payment))
@@ -148,7 +155,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
     for {
       store <- PaymentStore.inMemory[IO]
       _ <- store
-        .recordAuthorization("order-1", 4999, "pm-1", authorization)
+        .recordAuthorization("order-1", 4999, paymentMethodId, authorization)
         .map(_.getOrElse(fail("expected the authorization to be inserted")))
       found <- store.findByOrderId("order-1")
       missing <- store.findByOrderId("order-unknown")
@@ -165,12 +172,12 @@ class PaymentStoreSuite extends CatsEffectSuite {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
       first <- store
-        .recordAuthorization("order-1", 4999, "pm-1", authorization)
+        .recordAuthorization("order-1", 4999, paymentMethodId, authorization)
         .map(_.getOrElse(fail("expected the first insert")))
       second <- store.recordAuthorization(
         "order-1",
         4999,
-        "pm-1",
+        paymentMethodId,
         authorization
       )
       events <- outbox.get
@@ -186,12 +193,17 @@ class PaymentStoreSuite extends CatsEffectSuite {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
       _ <- store
-        .recordDecline("order-1", 4999, "pm-1", DeclineReason("declined"))
+        .recordDecline(
+          "order-1",
+          4999,
+          paymentMethodId,
+          DeclineReason("declined")
+        )
         .map(_.getOrElse(fail("expected the first decline")))
       second <- store.recordDecline(
         "order-1",
         4999,
-        "pm-1",
+        paymentMethodId,
         DeclineReason("declined")
       )
       events <- outbox.get
@@ -203,7 +215,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
 
   private def authorizedPayment(store: PaymentStore[IO]): IO[Payment] =
     store
-      .recordAuthorization("order-1", 4999, "pm-1", authorization)
+      .recordAuthorization("order-1", 4999, paymentMethodId, authorization)
       .map(_.getOrElse(fail("expected the authorization to be inserted")))
 
   test(
@@ -292,7 +304,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
       assertEquals(envelope.correlationId, "order-1")
       val event = envelope.payload.as[PaymentFailedEvent].toOption.get
       assertEquals(event.orderId, "order-1")
-      assertEquals(event.paymentId, failed.id)
+      assertEquals(event.paymentId, PaymentId.render(failed.id))
       assertEquals(event.amountCents, 4999)
       assertEquals(event.reason, "capture_failed")
     }

@@ -2,6 +2,7 @@ package paymentservice
 
 import cats.effect.IO
 import munit.CatsEffectSuite
+import paymentservice.domain.{PaymentId, PaymentMethodId}
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Status}
 
@@ -11,25 +12,25 @@ class HealthRoutesSuite extends CatsEffectSuite {
     new PaymentStore[IO] {
       def create(orderId: String, amountCents: Int): IO[Payment] =
         IO.raiseError(new NotImplementedError())
-      def get(id: String): IO[Option[Payment]] = IO.pure(None)
+      def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def update(
-          id: String,
+          id: PaymentId,
           status: PaymentStatus
       ): IO[Option[Payment]] = IO.pure(None)
-      def delete(id: String): IO[Boolean] = IO.pure(false)
+      def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
       def findByOrderId(orderId: String): IO[Option[Payment]] =
         IO.pure(None)
       def recordAuthorization(
           orderId: String,
           amountCents: Int,
-          paymentMethodId: String,
+          paymentMethodId: PaymentMethodId,
           authorization: Authorization
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordDecline(
           orderId: String,
           amountCents: Int,
-          paymentMethodId: String,
+          paymentMethodId: PaymentMethodId,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordCapture(orderId: String): IO[Option[Payment]] =
@@ -44,25 +45,25 @@ class HealthRoutesSuite extends CatsEffectSuite {
     new PaymentStore[IO] {
       def create(orderId: String, amountCents: Int): IO[Payment] =
         IO.raiseError(new NotImplementedError())
-      def get(id: String): IO[Option[Payment]] = IO.pure(None)
+      def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def update(
-          id: String,
+          id: PaymentId,
           status: PaymentStatus
       ): IO[Option[Payment]] = IO.pure(None)
-      def delete(id: String): IO[Boolean] = IO.pure(false)
+      def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)
       def findByOrderId(orderId: String): IO[Option[Payment]] =
         IO.pure(None)
       def recordAuthorization(
           orderId: String,
           amountCents: Int,
-          paymentMethodId: String,
+          paymentMethodId: PaymentMethodId,
           authorization: Authorization
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordDecline(
           orderId: String,
           amountCents: Int,
-          paymentMethodId: String,
+          paymentMethodId: PaymentMethodId,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordCapture(orderId: String): IO[Option[Payment]] =

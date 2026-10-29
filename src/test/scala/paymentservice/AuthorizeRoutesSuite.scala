@@ -2,6 +2,7 @@ package paymentservice
 
 import cats.effect.IO
 import munit.CatsEffectSuite
+import paymentservice.domain.{PaymentId, PaymentMethodId}
 import org.http4s.circe.CirceEntityCodec._
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Response, Status}
@@ -53,7 +54,13 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         Card("0002", CardBrand.Visa, "12/99"),
         billing
       )
-    } yield Fixture(payments, outbox, methods, approve.id, decline.id)
+    } yield Fixture(
+      payments,
+      outbox,
+      methods,
+      PaymentMethodId.render(approve.id),
+      PaymentMethodId.render(decline.id)
+    )
 
   test(
     "POST /payments/authorize returns 200 {authId, expiresAt} and records the outbox event"
@@ -119,15 +126,15 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       recorded <- cats.effect.Ref.of[IO, List[Payment]](Nil)
       spying = new PaymentStore[IO] {
         def create(o: String, a: Int) = payments.create(o, a)
-        def get(id: String) = payments.get(id)
-        def update(id: String, s: PaymentStatus) = payments.update(id, s)
-        def delete(id: String) = payments.delete(id)
+        def get(id: PaymentId) = payments.get(id)
+        def update(id: PaymentId, s: PaymentStatus) = payments.update(id, s)
+        def delete(id: PaymentId) = payments.delete(id)
         def ping = payments.ping
         def findByOrderId(o: String) = payments.findByOrderId(o)
         def recordAuthorization(
             o: String,
             a: Int,
-            m: String,
+            m: PaymentMethodId,
             auth: Authorization
         ) =
           payments
@@ -136,7 +143,12 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
               case Some(p) => recorded.update(_ :+ p)
               case None    => IO.unit
             }
-        def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
+        def recordDecline(
+            o: String,
+            a: Int,
+            m: PaymentMethodId,
+            r: DeclineReason
+        ) =
           payments
             .recordDecline(o, a, m, r)
             .flatTap {
@@ -156,7 +168,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     } yield {
       assertEquals(all.map(_.status), List(PaymentStatus.Failed))
       assertEquals(all.flatMap(_.declineReason), List("insufficient_funds"))
-      assertEquals(all.flatMap(_.paymentMethodId), List(f0.declineId))
+      assertEquals(
+        all.flatMap(_.paymentMethodId).map(PaymentMethodId.render),
+        List(f0.declineId)
+      )
       assertEquals(all.map(_.orderId), List("order-2"))
       assertEquals(all.map(_.amountCents), List(4999))
     }
@@ -165,7 +180,13 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
   test("POST /payments/authorize returns 404 for an unknown payment method") {
     for {
       f <- fixture
-      response <- f.authorize(AuthorizePaymentRequest("order-1", 4999, "nope"))
+      response <- f.authorize(
+        AuthorizePaymentRequest(
+          "order-1",
+          4999,
+          java.util.UUID.randomUUID().toString
+        )
+      )
       body <- response.as[ErrorResponse]
     } yield {
       assertEquals(response.status, Status.NotFound)
@@ -214,19 +235,24 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       }
       failingPayments = new PaymentStore[IO] {
         def create(o: String, a: Int) = f.payments.create(o, a)
-        def get(id: String) = f.payments.get(id)
-        def update(id: String, s: PaymentStatus) = f.payments.update(id, s)
-        def delete(id: String) = f.payments.delete(id)
+        def get(id: PaymentId) = f.payments.get(id)
+        def update(id: PaymentId, s: PaymentStatus) = f.payments.update(id, s)
+        def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: String) = f.payments.findByOrderId(o)
         def recordAuthorization(
             o: String,
             a: Int,
-            m: String,
+            m: PaymentMethodId,
             auth: Authorization
         ) =
           IO.raiseError(new RuntimeException("db down"))
-        def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
+        def recordDecline(
+            o: String,
+            a: Int,
+            m: PaymentMethodId,
+            r: DeclineReason
+        ) =
           f.payments.recordDecline(o, a, m, r)
         def recordCapture(o: String) = f.payments.recordCapture(o)
         def recordCaptureFailure(o: String, r: String) =
@@ -394,7 +420,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         .recordAuthorization(
           "order-race",
           4999,
-          f.approveId,
+          PaymentMethodId.parse(f.approveId).toOption.get,
           Authorization(
             "auth_winner",
             java.time.Instant.parse("2026-11-03T12:00:00Z")
@@ -405,9 +431,9 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       voided <- cats.effect.Ref.of[IO, List[String]](Nil)
       racingStore = new PaymentStore[IO] {
         def create(o: String, a: Int) = f.payments.create(o, a)
-        def get(id: String) = f.payments.get(id)
-        def update(id: String, s: PaymentStatus) = f.payments.update(id, s)
-        def delete(id: String) = f.payments.delete(id)
+        def get(id: PaymentId) = f.payments.get(id)
+        def update(id: PaymentId, s: PaymentStatus) = f.payments.update(id, s)
+        def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: String) =
           lookups.modify(n => (n + 1, n)).flatMap { n =>
@@ -416,10 +442,15 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def recordAuthorization(
             o: String,
             a: Int,
-            m: String,
+            m: PaymentMethodId,
             auth: Authorization
         ) = IO.pure(None)
-        def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
+        def recordDecline(
+            o: String,
+            a: Int,
+            m: PaymentMethodId,
+            r: DeclineReason
+        ) =
           f.payments.recordDecline(o, a, m, r)
         def recordCapture(o: String) = f.payments.recordCapture(o)
         def recordCaptureFailure(o: String, r: String) =
@@ -452,18 +483,23 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       voided <- cats.effect.Ref.of[IO, List[String]](Nil)
       racingStore = new PaymentStore[IO] {
         def create(o: String, a: Int) = f.payments.create(o, a)
-        def get(id: String) = f.payments.get(id)
-        def update(id: String, s: PaymentStatus) = f.payments.update(id, s)
-        def delete(id: String) = f.payments.delete(id)
+        def get(id: PaymentId) = f.payments.get(id)
+        def update(id: PaymentId, s: PaymentStatus) = f.payments.update(id, s)
+        def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: String) = IO.pure(None)
         def recordAuthorization(
             o: String,
             a: Int,
-            m: String,
+            m: PaymentMethodId,
             auth: Authorization
         ) = IO.pure(None)
-        def recordDecline(o: String, a: Int, m: String, r: DeclineReason) =
+        def recordDecline(
+            o: String,
+            a: Int,
+            m: PaymentMethodId,
+            r: DeclineReason
+        ) =
           f.payments.recordDecline(o, a, m, r)
         def recordCapture(o: String) = f.payments.recordCapture(o)
         def recordCaptureFailure(o: String, r: String) =
