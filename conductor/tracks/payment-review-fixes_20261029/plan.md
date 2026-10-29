@@ -1,11 +1,11 @@
 # Payment review fixes — Implementation Plan
 
-## Phase 1 — Pure lifecycle and server-owned status (FR-1, FR-5)
+## Phase 1 — Pure lifecycle and server-owned status (FR-1, FR-5) [checkpoint: 036e1fb]
 
-- [ ] Write failing tests: `PaymentStatusTransitionSuite` (table + ScalaCheck: every illegal pair rejected, terminals absorbing); store conditional-update returns typed error on status mismatch (in-memory + Postgres); PATCH/PUT /payments/{id} → 404/405; confirm failure.
-- [ ] Implement `domain/PaymentStatus.transition` + `IllegalTransition`; `PaymentStore` status writes take `expected` (`WHERE status = $expected`); remove `UpdatePaymentRequest`, PATCH/PUT endpoints, `store.update`; void path uses transition.
-- [ ] Refactor: exhaustive match over `PaymentStatus` in `AuthorizeRoutes` (no catch-all); update fixtures.
-- [ ] Task: Conductor - User Manual Verification 'Phase 1 — Pure lifecycle' (Protocol in workflow.md)
+- [x] Write failing tests: `PaymentStatusTransitionSuite` (table + ScalaCheck: every illegal pair rejected, terminals absorbing); store conditional-update returns typed error on status mismatch (in-memory + Postgres); PATCH/PUT /payments/{id} → 404/405; confirm failure. — 036e1fb
+- [x] Implement `PaymentStatus.transition` + `IllegalTransition` (kept in `PaymentStatus.scala`, not `domain/`, beside the ADT); `PaymentStore` status writes take `expected` (`WHERE status = $expected`); remove `UpdatePaymentRequest`, PATCH/PUT endpoints, `store.update`; void path uses conditional `recordVoid`. — 036e1fb
+- [x] Refactor: exhaustive match over `PaymentStatus` in `AuthorizeRoutes` (no catch-all); update fixtures. — 036e1fb
+- [x] Task: Conductor - User Manual Verification 'Phase 1 — Pure lifecycle' (Protocol in workflow.md) — covered by suite (168 green, incl. Postgres testcontainers)
 
 ## Phase 2 — Gateway atomicity and cancellation (FR-2, FR-4)
 
