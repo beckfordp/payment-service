@@ -1,0 +1,1 @@
+Phase 2: FulfilmentEventConsumer.handle extracted (broker-free tests); None from recordCapture/recordCaptureFailure/recordVoid after gateway call raises UnrecordedTransition -> retry/DLQ; gateway idempotency-by-authId contract documented + tested (simulator already pure); AuthorizeRoutes guaranteeCase voids hold on error or cancel. 176 tests green.
