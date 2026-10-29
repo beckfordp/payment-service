@@ -1,0 +1,1 @@
+Phase 1 review fixes: PaymentStatus.transition + IllegalTransition; store update() replaced by conditional recordVoid; transition SQL parameterised on expected status; PATCH/PUT /payments/{id} and UpdatePaymentRequest/InvalidStatus removed; exhaustive replay match in AuthorizeRoutes. 168 tests green.
