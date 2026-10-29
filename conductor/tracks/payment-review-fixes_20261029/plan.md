@@ -13,11 +13,11 @@
 - [x] Implement idempotent simulated gateway (deviation: simulator outcome is already a pure function of card token, so no `Ref` ledger - contract documented + tested); raise `UnrecordedTransition` on `None` in `FulfilmentEventConsumer`; `guaranteeCase` void in `AuthorizeRoutes`. — b9aad38
 - [x] Task: Conductor - User Manual Verification 'Phase 2 — Gateway atomicity' (Protocol in workflow.md) — covered by suite (176 green)
 
-## Phase 3 — Event DLQ, expiry, create validation (FR-3, FR-6, FR-7)
+## Phase 3 — Event DLQ, expiry, create validation (FR-3, FR-6, FR-7) [checkpoint: f129927]
 
-- [ ] Write failing tests: undecodable + unknown fulfilment-event → raw to DLQ, offset committed after DLQ; expired authorization replay not 200; capture after `expires_at` rejected by SQL guard; duplicate POST /payments → 409 (Postgres + in-memory); amountCents <= 0 → 400; confirm failure.
-- [ ] Implement DLQ-on-decode-failure; replay expiry check + `expires_at > now()` guard; `ON CONFLICT` + 409 errorOut + amount validation + in-memory uniqueness.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3 — DLQ, expiry, validation' (Protocol in workflow.md)
+- [x] Write failing tests: undecodable + unknown fulfilment-event → raw to DLQ, offset committed after DLQ; expired authorization replay not 200; capture after `expires_at` rejected by SQL guard; duplicate POST /payments → 409 (Postgres + in-memory); amountCents <= 0 → 400; confirm failure. — f129927 (13 red before impl)
+- [x] Implement DLQ-on-decode-failure; replay expiry check + `expires_at > now()` guard (plus consumer pre-check: expired → DLQ, no gateway call); `ON CONFLICT` + 409 errorOut + amount validation + in-memory uniqueness. Fixture expiries moved to 2099. — f129927
+- [x] Task: Conductor - User Manual Verification 'Phase 3 — DLQ, expiry, validation' (Protocol in workflow.md) — covered by suite (188 green)
 
 ## Phase 4 — Low-severity cleanup (FR-8, FR-9, FR-10, FR-11)
 
