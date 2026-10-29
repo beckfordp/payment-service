@@ -2,9 +2,6 @@
 
 This file tracks all major tracks for the project.
 
-- [x] **Track: TD-15.3 — Cross-repo consistency hardening (payment-service)**
-  *Link: [./tracks/td15-payment-hardening_20261029/](./tracks/td15-payment-hardening_20261029/)*
-
 - [x] **Track: Transactional outbox for payment-service (TD-3.4, ADR 0008)**
   *Link: [./tracks/outbox_20261012/](./tracks/outbox_20261012/)*
 
