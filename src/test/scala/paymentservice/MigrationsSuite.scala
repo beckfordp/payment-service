@@ -1,5 +1,7 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import cats.effect.IO
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
@@ -156,13 +158,13 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
         )
         try {
           val stmt = conn.createStatement()
-          List("pending", "authorized", "captured", "failed").foreach {
-            status =>
+          List("pending", "authorized", "captured", "failed", "voided")
+            .foreach { status =>
               stmt.executeUpdate(
                 "insert into \"payment\" (id, order_id, amount_cents, status) " +
                   s"values (gen_random_uuid(), 'order-$status', 100, '$status')"
               )
-          }
+            }
         } finally conn.close()
       }
     }

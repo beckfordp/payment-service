@@ -1,8 +1,10 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import cats.effect.IO
 import munit.CatsEffectSuite
-import paymentservice.domain.{PaymentId, PaymentMethodId}
+import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Status}
 
@@ -10,60 +12,60 @@ class HealthRoutesSuite extends CatsEffectSuite {
 
   private val readyStore: PaymentStore[IO] =
     new PaymentStore[IO] {
-      def create(orderId: String, amountCents: Int): IO[Payment] =
+      def create(orderId: OrderId, amountCents: Int): IO[Payment] =
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
-      def recordVoid(orderId: String): IO[Option[Payment]] = IO.pure(None)
+      def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
-      def findByOrderId(orderId: String): IO[Option[Payment]] =
+      def findByOrderId(orderId: OrderId): IO[Option[Payment]] =
         IO.pure(None)
       def recordAuthorization(
-          orderId: String,
+          orderId: OrderId,
           amountCents: Int,
           paymentMethodId: PaymentMethodId,
           authorization: Authorization
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordDecline(
-          orderId: String,
+          orderId: OrderId,
           amountCents: Int,
           paymentMethodId: PaymentMethodId,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
-      def recordCapture(orderId: String): IO[Option[Payment]] =
+      def recordCapture(orderId: OrderId): IO[Option[Payment]] =
         IO.raiseError(new NotImplementedError)
       def recordCaptureFailure(
-          orderId: String,
+          orderId: OrderId,
           reason: String
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
     }
 
   private val notReadyStore: PaymentStore[IO] =
     new PaymentStore[IO] {
-      def create(orderId: String, amountCents: Int): IO[Payment] =
+      def create(orderId: OrderId, amountCents: Int): IO[Payment] =
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
-      def recordVoid(orderId: String): IO[Option[Payment]] = IO.pure(None)
+      def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)
-      def findByOrderId(orderId: String): IO[Option[Payment]] =
+      def findByOrderId(orderId: OrderId): IO[Option[Payment]] =
         IO.pure(None)
       def recordAuthorization(
-          orderId: String,
+          orderId: OrderId,
           amountCents: Int,
           paymentMethodId: PaymentMethodId,
           authorization: Authorization
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordDecline(
-          orderId: String,
+          orderId: OrderId,
           amountCents: Int,
           paymentMethodId: PaymentMethodId,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
-      def recordCapture(orderId: String): IO[Option[Payment]] =
+      def recordCapture(orderId: OrderId): IO[Option[Payment]] =
         IO.raiseError(new NotImplementedError)
       def recordCaptureFailure(
-          orderId: String,
+          orderId: OrderId,
           reason: String
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
     }

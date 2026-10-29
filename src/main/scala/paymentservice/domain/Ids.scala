@@ -1,6 +1,7 @@
 package paymentservice.domain
 
 import cats.syntax.all._
+import io.circe.{Decoder, Encoder}
 import sttp.tapir.{Codec, CodecFormat, DecodeResult, Schema}
 
 import java.util.UUID
@@ -52,4 +53,26 @@ object PaymentMethodId {
   def uuid(value: PaymentMethodId): UUID = value
 
   def render(value: PaymentMethodId): String = value.toString
+
+  given Decoder[PaymentMethodId] = Decoder.decodeString.emap(parse)
+  given Encoder[PaymentMethodId] = Encoder.encodeString.contramap(render)
+  given Schema[PaymentMethodId] = Schema.string[PaymentMethodId]
+}
+
+/** order-service's order id as this service references it (no FK - a different
+  * database). Opaque over the raw string so the idempotency key, outbox
+  * aggregate id and Kafka key can't be confused with any other string; the only
+  * rule this side enforces is non-blank.
+  */
+opaque type OrderId = String
+
+object OrderId {
+
+  def parse(raw: String): Either[String, OrderId] =
+    Either.cond(raw.trim.nonEmpty, raw, "orderId is required")
+
+  /** For values this service already validated - its own database rows. */
+  def trusted(raw: String): OrderId = raw
+
+  def render(value: OrderId): String = value
 }

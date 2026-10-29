@@ -1,11 +1,13 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import cats.effect.IO
 import cats.syntax.all._
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
 import munit.CatsEffectSuite
-import paymentservice.domain.{PaymentId, PaymentMethodId}
+import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 
 import java.util.UUID
 import org.testcontainers.utility.DockerImageName
@@ -464,7 +466,7 @@ class PaymentStorePostgresSuite
           found <- store.findByOrderId(orderId)
           missing <- store.findByOrderId("order-unknown")
         } yield {
-          assertEquals(found.map(_.orderId), Some(orderId))
+          assertEquals(found.map(_.orderId), Some(OrderId.trusted(orderId)))
           assertEquals(found.map(_.status), Some(PaymentStatus.Authorized))
           assertEquals(missing, None)
         }

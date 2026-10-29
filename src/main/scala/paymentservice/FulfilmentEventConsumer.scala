@@ -8,6 +8,7 @@ import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
+import paymentservice.domain.OrderId
 import purekafka.consumer.DeadLetter
 import sttp.tapir.Schema
 
@@ -108,7 +109,7 @@ object FulfilmentEventConsumer {
       logger: StructuredLogger[F],
       deadLetter: DeadLetter[F, String, String]
   )(key: String, value: Option[String]): F[Unit] = {
-    def unrecorded(orderId: String, target: PaymentStatus): F[Unit] =
+    def unrecorded(orderId: OrderId, target: PaymentStatus): F[Unit] =
       Async[F].raiseError(UnrecordedTransition(orderId, target))
 
     /** Schema drift must not silently stop captures: anything this consumer
@@ -118,8 +119,11 @@ object FulfilmentEventConsumer {
     def deadLetterRaw(raw: String, error: Throwable): F[Unit] =
       deadLetter.guard(topic, key, raw)(Async[F].raiseError(error))
 
-    def handleDispatchFailed(event: DispatchFailedEvent): F[Unit] =
-      store.findByOrderId(event.orderId).flatMap {
+    def handleDispatchFailed(
+        orderId: OrderId,
+        event: DispatchFailedEvent
+    ): F[Unit] =
+      store.findByOrderId(orderId).flatMap {
         case None =>
           logger.warn(Map("order_id" -> event.orderId))(
             "DispatchFailed for an unknown payment - skipping"
@@ -141,19 +145,22 @@ object FulfilmentEventConsumer {
               )
             case Some(authId) =>
               gateway.void(authId) *>
-                store.recordVoid(event.orderId).flatMap {
+                store.recordVoid(orderId).flatMap {
                   case Some(_) =>
                     logger.info(
                       Map("order_id" -> event.orderId)
                     )("Authorization voided")
                   case None =>
-                    unrecorded(event.orderId, PaymentStatus.Voided)
+                    unrecorded(orderId, PaymentStatus.Voided)
                 }
           }
       }
 
-    def handleDispatchConfirmed(event: DispatchConfirmedEvent): F[Unit] =
-      store.findByOrderId(event.orderId).flatMap {
+    def handleDispatchConfirmed(
+        orderId: OrderId,
+        event: DispatchConfirmedEvent
+    ): F[Unit] =
+      store.findByOrderId(orderId).flatMap {
         case None =>
           logger.warn(Map("order_id" -> event.orderId))(
             "DispatchConfirmed for an unknown payment - skipping"
@@ -195,16 +202,16 @@ object FulfilmentEventConsumer {
                   Async[F].realTimeInstant.flatMap { now =>
                     Async[F].raiseUnless(
                       payment.expiresAt.exists(_.isAfter(now))
-                    )(AuthorizationExpired(event.orderId))
+                    )(AuthorizationExpired(orderId))
                   } *> gateway.capture(authId, method.cardToken).flatMap {
                     case Right(_) =>
-                      store.recordCapture(event.orderId).flatMap {
+                      store.recordCapture(orderId).flatMap {
                         case Some(_) =>
                           logger.info(
                             Map("order_id" -> event.orderId)
                           )("Payment captured")
                         case None =>
-                          unrecorded(event.orderId, PaymentStatus.Captured)
+                          unrecorded(orderId, PaymentStatus.Captured)
                       }
                     case Left(decline) =>
                       logger.warn(
@@ -215,13 +222,13 @@ object FulfilmentEventConsumer {
                       )("Capture declined - recording PaymentFailed") *>
                         store
                           .recordCaptureFailure(
-                            event.orderId,
+                            orderId,
                             captureFailedReason
                           )
                           .flatMap {
                             case Some(_) => Async[F].unit
                             case None    =>
-                              unrecorded(event.orderId, PaymentStatus.Failed)
+                              unrecorded(orderId, PaymentStatus.Failed)
                           }
                   }
               }
@@ -254,9 +261,14 @@ object FulfilmentEventConsumer {
                       "Failed to decode DispatchFailed payload"
                     ) *> deadLetterRaw(raw, error)
                   case Right(event) =>
-                    deadLetter.guard(topic, key, raw)(
-                      handleDispatchFailed(event)
-                    )
+                    OrderId.parse(event.orderId) match {
+                      case Left(error) =>
+                        deadLetterRaw(raw, new IllegalArgumentException(error))
+                      case Right(orderId) =>
+                        deadLetter.guard(topic, key, raw)(
+                          handleDispatchFailed(orderId, event)
+                        )
+                    }
                 }
               case "DispatchConfirmed" =>
                 envelope.payload.as[DispatchConfirmedEvent] match {
@@ -268,9 +280,14 @@ object FulfilmentEventConsumer {
                       "Failed to decode DispatchConfirmed payload"
                     ) *> deadLetterRaw(raw, error)
                   case Right(event) =>
-                    deadLetter.guard(topic, key, raw)(
-                      handleDispatchConfirmed(event)
-                    )
+                    OrderId.parse(event.orderId) match {
+                      case Left(error) =>
+                        deadLetterRaw(raw, new IllegalArgumentException(error))
+                      case Right(orderId) =>
+                        deadLetter.guard(topic, key, raw)(
+                          handleDispatchConfirmed(orderId, event)
+                        )
+                    }
                 }
               case other =>
                 logger.warn(
@@ -292,12 +309,12 @@ object FulfilmentEventConsumer {
   * authorized row - raised so the record is retried / dead-lettered instead of
   * committed with the payment out of step with the gateway.
   */
-final case class AuthorizationExpired(orderId: String)
+final case class AuthorizationExpired(orderId: OrderId)
     extends RuntimeException(
-      s"Authorization for order $orderId expired before it was captured"
+      s"Authorization for order ${OrderId.render(orderId)} expired before it was captured"
     )
 
-final case class UnrecordedTransition(orderId: String, target: PaymentStatus)
+final case class UnrecordedTransition(orderId: OrderId, target: PaymentStatus)
     extends RuntimeException(
-      s"Payment for order $orderId was not authorized when recording ${target.asString}"
+      s"Payment for order ${OrderId.render(orderId)} was not authorized when recording ${target.asString}"
     )

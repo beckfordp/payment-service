@@ -1,5 +1,7 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import io.circe.parser.decode
 import io.circe.syntax._
 import munit.FunSuite

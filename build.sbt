@@ -100,8 +100,8 @@ lazy val root = project
       "io.github.beckfordp" %% "purerestlib" % purerestlibVersion,
       "org.typelevel" %% "cats-effect" % catsEffectVersion,
       // purekafka: AsyncAPI docs types (purekafka.docs) for this service's
-      // outbox/CDC publish contracts. No consumer/producer runtime usage -
-      // payment-service has no Kafka consumers until later checkout journeys.
+      // outbox/CDC publish contracts, plus the DLQ/supervision runtime for the
+      // fulfilment-events consumer (US-18.2/19.1).
       "io.github.beckfordp" %% "purekafka" % purekafkaVersion,
       "org.http4s" %% "http4s-ember-server" % http4sVersion,
       "org.http4s" %% "http4s-dsl" % http4sVersion,

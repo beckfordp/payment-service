@@ -1,5 +1,7 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import munit.CatsEffectSuite
 
 class PaymentStatusSuite extends CatsEffectSuite {

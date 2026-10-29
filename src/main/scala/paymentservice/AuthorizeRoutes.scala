@@ -5,7 +5,7 @@ import cats.effect.syntax.all._
 import cats.syntax.all._
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
-import paymentservice.domain.{PaymentId, PaymentMethodId}
+import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
@@ -20,7 +20,7 @@ import java.time.Instant
 final case class AuthorizePaymentRequest(
     orderId: String,
     amountCents: Int,
-    paymentMethodId: String
+    paymentMethodId: PaymentMethodId
 )
 
 object AuthorizePaymentRequest {
@@ -126,11 +126,11 @@ object AuthorizeRoutes {
         )
       )
 
-  private def validate(req: AuthorizePaymentRequest): Either[String, Unit] =
+  private def validate(req: AuthorizePaymentRequest): Either[String, OrderId] =
     for {
-      _ <- Either.cond(req.orderId.trim.nonEmpty, (), "orderId is required")
+      orderId <- OrderId.parse(req.orderId)
       _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
-    } yield ()
+    } yield orderId
 
   def authorizeServerEndpoint[F[_]: MonadCancelThrow: Clock](
       payments: PaymentStore[F],
@@ -141,7 +141,7 @@ object AuthorizeRoutes {
     authorizeEndpoint.serverLogic[F] { req =>
       val context = Map(
         "order_id" -> req.orderId,
-        "payment_method_id" -> req.paymentMethodId
+        "payment_method_id" -> PaymentMethodId.render(req.paymentMethodId)
       )
 
       /** A stored outcome for this order is replayed instead of placing a
@@ -214,6 +214,7 @@ object AuthorizeRoutes {
         * winner.
         */
       def replayAfterConflict(
+          orderId: OrderId,
           voidedAuthId: Option[String],
           methodId: PaymentMethodId
       ): F[Either[AuthorizeError, AuthorizePaymentResponse]] = {
@@ -226,7 +227,7 @@ object AuthorizeRoutes {
               )
             }
         }
-        release *> payments.findByOrderId(req.orderId).flatMap {
+        release *> payments.findByOrderId(orderId).flatMap {
           case Some(existing) => replayExisting(existing, methodId)
           case None           =>
             logger
@@ -244,17 +245,18 @@ object AuthorizeRoutes {
       }
 
       def authorizeWith(
+          orderId: OrderId,
           method: PaymentMethod
       ): F[Either[AuthorizeError, AuthorizePaymentResponse]] = {
         val methodId = method.id
-        payments.findByOrderId(req.orderId).flatMap {
+        payments.findByOrderId(orderId).flatMap {
           case Some(existing) => replayExisting(existing, methodId)
           case None           =>
             gateway.authorize(method.cardToken, req.amountCents).flatMap {
               case Right(authorization) =>
                 payments
                   .recordAuthorization(
-                    req.orderId,
+                    orderId,
                     req.amountCents,
                     method.id,
                     authorization
@@ -292,12 +294,16 @@ object AuthorizeRoutes {
                           )
                         )
                     case None =>
-                      replayAfterConflict(Some(authorization.authId), methodId)
+                      replayAfterConflict(
+                        orderId,
+                        Some(authorization.authId),
+                        methodId
+                      )
                   }
               case Left(decline) =>
                 payments
                   .recordDecline(
-                    req.orderId,
+                    orderId,
                     req.amountCents,
                     method.id,
                     decline
@@ -312,7 +318,7 @@ object AuthorizeRoutes {
                           )
                         )("Payment declined")
                         .as(Left(AuthorizeError.Declined(decline.value)))
-                    case None => replayAfterConflict(None, methodId)
+                    case None => replayAfterConflict(orderId, None, methodId)
                   }
             }
         }
@@ -327,26 +333,17 @@ object AuthorizeRoutes {
             logger
               .warn(context + ("error" -> error))("Invalid authorize request")
               .as(Left(AuthorizeError.Invalid(error)))
-          case Right(()) =>
-            PaymentMethodId.parse(req.paymentMethodId) match {
-              case Left(error) =>
+          case Right(orderId) =>
+            methods.get(req.paymentMethodId).flatMap {
+              case None =>
                 logger
-                  .warn(context + ("error" -> error))(
-                    "Invalid payment method id"
+                  .warn(context)("Payment method not found")
+                  .as(Left(AuthorizeError.MethodNotFound))
+              case Some(method) =>
+                authorizeWith(orderId, method).onError { case error =>
+                  logger.error(context, error)(
+                    "Authorizing the payment failed"
                   )
-                  .as(Left(AuthorizeError.Invalid(error)))
-              case Right(methodId) =>
-                methods.get(methodId).flatMap {
-                  case None =>
-                    logger
-                      .warn(context)("Payment method not found")
-                      .as(Left(AuthorizeError.MethodNotFound))
-                  case Some(method) =>
-                    authorizeWith(method).onError { case error =>
-                      logger.error(context, error)(
-                        "Authorizing the payment failed"
-                      )
-                    }
                 }
             }
         }

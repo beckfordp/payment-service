@@ -4,9 +4,10 @@ set -euo pipefail
 # Verifies Phase 1 of track checkout-authorize_20261027 (ADR 0011) against a
 # real sbt run instance + Postgres: the service boots with the new
 # payment-gateway.simulated config block, Flyway applies V4, and the new
-# `authorized` status round-trips through PATCH /payments/{id} (accepted by
-# both PaymentStatus and the widened payment_status_check). Address/Card/
-# gateway logic has no HTTP surface yet - covered by their unit suites.
+# `authorized` status is accepted by the widened payment_status_check and read
+# back through GET /payments/{id} (PaymentStatus decodes it). Status is
+# server-owned since the 2026-10-29 review fixes - no PATCH - so the row is
+# moved directly in Postgres.
 #
 # Usage: ./scripts/verify-domain-foundations.sh
 
@@ -69,17 +70,20 @@ v4="$(docker compose exec -T postgres psql -U payment -d payment -tAc \
 check "V4 recorded in flyway_schema_history" "1" "$v4"
 
 echo
-echo "4. A payment can be moved to 'authorized'..."
+echo "4. 'authorized' is a valid stored status..."
 id="$(curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"orderId":"verify-foundations","amountCents":100}' \
+  -d "{\"orderId\":\"verify-foundations-$(date +%s)\",\"amountCents\":100}" \
   http://localhost:8080/payments | sed -E 's/.*"id":"([^"]+)".*/\1/')"
-patched="$(curl -s -X PATCH -H 'Content-Type: application/json' \
-  -d '{"status":"authorized"}' "http://localhost:8080/payments/${id}")"
-status="$(echo "$patched" | sed -E 's/.*"status":"([^"]+)".*/\1/')"
-check "PATCH status=authorized echoes authorized" "authorized" "$status"
-stored="$(docker compose exec -T postgres psql -U payment -d payment -tAc \
-  "select status from payment where id = '${id}'")"
-check "row stored as authorized" "authorized" "$stored"
+docker compose exec -T postgres psql -U payment -d payment -tAc \
+  "update payment set status = 'authorized' where id = '${id}'" >/dev/null
+read_back="$(curl -s "http://localhost:8080/payments/${id}")"
+status="$(echo "$read_back" | sed -E 's/.*"status":"([^"]+)".*/\1/')"
+check "GET reads back status=authorized" "authorized" "$status"
+patch_code="$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+  -H 'Content-Type: application/json' -d '{"status":"captured"}' \
+  "http://localhost:8080/payments/${id}")"
+check "PATCH is gone (404/405)" "yes" \
+  "$([ "$patch_code" = 404 ] || [ "$patch_code" = 405 ] && echo yes || echo "no: $patch_code")"
 
 echo
 if [ "$FAILED" -eq 0 ]; then

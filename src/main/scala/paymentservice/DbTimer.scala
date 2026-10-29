@@ -1,6 +1,7 @@
 package paymentservice
 
-import cats.effect.Async
+import cats.MonadThrow
+import cats.effect.Clock
 import cats.syntax.all._
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.Meter
@@ -18,7 +19,7 @@ trait DbTimer[F[_]] {
 
 object DbTimer {
 
-  def create[F[_]: Async](meter: Meter[F]): F[DbTimer[F]] =
+  def create[F[_]: MonadThrow: Clock](meter: Meter[F]): F[DbTimer[F]] =
     meter
       .histogram[Double]("db.client.operation.duration")
       .withUnit("s")
@@ -27,9 +28,9 @@ object DbTimer {
         new DbTimer[F] {
           def timed[A](operation: String)(fa: F[A]): F[A] =
             for {
-              start <- Async[F].monotonic
+              start <- Clock[F].monotonic
               result <- fa.attempt
-              end <- Async[F].monotonic
+              end <- Clock[F].monotonic
               outcomeAttributes = result match {
                 case Right(_)    => Nil
                 case Left(error) =>

@@ -28,12 +28,17 @@ implemented.
   `Order` — different service, different database, no real FK), `amountCents`
   (create-only), `status` (server-defaulted `PaymentStatus.Pending`,
   serialized as `"pending"`; hardened to a closed `PaymentStatus` ADT —
-  `Pending`/`Authorized`/`Captured`/`Failed` (ADR 0011; `Captured` replaced
-  `Settled` 2026-10-27)
+  `Pending`/`Authorized`/`Captured`/`Failed`/`Voided` (ADR 0011; `Captured`
+  replaced `Settled` 2026-10-27; `Voided` added by US-18.2)
   — at both the Scala and DB level, mirroring
   order-service's own `OrderStatus`: a `text.eimap`-based Skunk codec plus a
-  Postgres `CHECK` constraint (`payment_status_check`). PATCH/PUT reject any
-  other value with `400`), `createdAt`/`updatedAt`.
+  Postgres `CHECK` constraint (`payment_status_check`). Status is
+  server-owned: `PaymentStatus.transition` is the pure lifecycle
+  (`pending -> authorized|failed`, `authorized -> captured|voided|failed`;
+  the rest terminal) and every store write is conditional on the expected
+  current status. PATCH/PUT were removed by the 2026-10-29 review fixes),
+  `createdAt`/`updatedAt`. `orderId` is an opaque `OrderId` (non-blank),
+  unique per payment - a second `POST /payments` for it is `409`.
 - Authorize outcome fields (nullable, set only by `POST /payments/authorize`):
   `paymentMethodId` (FK to `payment_methods`), `authId`, `expiresAt` (what
   Journey 5's expiry sweep will poll), `declineReason`.
@@ -42,9 +47,8 @@ implemented.
   (visa/mastercard/amex/other), `expiry` (MM/YY), `billingAddress` (US-12.1,
   JSONB), `createdAt`. PAN validated (Luhn/length/expiry) then dropped —
   never stored or logged.
-- No other fields generated — the full CRUD surface (`POST`/`GET`/`PATCH`/
-  `PUT`/`DELETE /payments{/id}`) matches the field-spec exactly; nothing
-  codegen couldn't represent beyond the enum gap above.
+- No other fields generated — the CRUD surface is `POST`/`GET`/`DELETE
+  /payments{/id}` (generated `PATCH`/`PUT` removed: status is server-owned).
 - **Known gotcha fixed in `OrderReservedConsumer`:** a null Kafka message key
   (e.g. a producer that never sets one) used to crash the whole background
   consumer stream silently; both key and value deserializers are now
@@ -110,3 +114,11 @@ retired by Rework 7.
   {reason: capture_failed}`. The conditional `authorized -> captured|failed`
   update is the idempotency guard: a redelivered `DispatchConfirmed` finds no
   authorized row and no-ops.
+- Review fixes (2026-10-29): gateway `capture`/`void` must be idempotent by
+  `authId`, so a store write failing after the gateway call raises and the
+  whole record retries / dead-letters (`UnrecordedTransition`) instead of
+  committing. Undecodable or unknown `fulfilment-events` records go raw to
+  `fulfilment-events-dlq`. Captures refuse an expired authorization (consumer
+  pre-check + `expires_at > now()` SQL guard); an authorize replay of an
+  expired authorization is `409`. An authorize request cancelled after the
+  gateway hold is placed voids the hold (`guaranteeCase`).

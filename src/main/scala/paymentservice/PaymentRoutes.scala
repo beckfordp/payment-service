@@ -5,7 +5,7 @@ import cats.effect.Async
 import cats.syntax.all._
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
-import paymentservice.domain.PaymentId
+import paymentservice.domain.{OrderId, PaymentId}
 import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
@@ -36,7 +36,7 @@ object PaymentResponse {
   def apply(entity: Payment): PaymentResponse =
     PaymentResponse(
       PaymentId.render(entity.id),
-      entity.orderId,
+      OrderId.render(entity.orderId),
       entity.amountCents,
       entity.status.asString,
       entity.createdAt,
@@ -89,11 +89,11 @@ object PaymentRoutes {
         )
       )
 
-  private def validate(req: CreatePaymentRequest): Either[String, Unit] =
+  private def validate(req: CreatePaymentRequest): Either[String, OrderId] =
     for {
-      _ <- Either.cond(req.orderId.trim.nonEmpty, (), "orderId is required")
+      orderId <- OrderId.parse(req.orderId)
       _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
-    } yield ()
+    } yield orderId
 
   private val notFoundVariant
       : EndpointOutput.OneOfVariant[PaymentNotFound.type] =
@@ -131,9 +131,11 @@ object PaymentRoutes {
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
     createPaymentEndpoint.serverLogic[F] { req =>
-      def create: F[Either[CreatePaymentError, PaymentResponse]] =
+      def create(
+          orderId: OrderId
+      ): F[Either[CreatePaymentError, PaymentResponse]] =
         store
-          .create(req.orderId, req.amountCents)
+          .create(orderId, req.amountCents)
           .attemptNarrow[PaymentAlreadyExists]
           .flatMap {
             case Right(entity) =>
@@ -163,7 +165,7 @@ object PaymentRoutes {
           logger
             .warn(Map("error" -> error))("Invalid payment request")
             .as(Left(CreatePaymentError.Invalid(error)))
-        case Right(()) => create
+        case Right(orderId) => create(orderId)
       })
     }
 

@@ -1,9 +1,11 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import cats.effect.IO
 import cats.syntax.all._
 import munit.CatsEffectSuite
-import paymentservice.domain.{PaymentId, PaymentMethodId}
+import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 import org.http4s.circe.CirceEntityCodec._
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Status}
@@ -22,31 +24,31 @@ class PaymentRoutesSuite extends CatsEffectSuite {
 
   private def failingStore(error: Throwable): PaymentStore[IO] =
     new PaymentStore[IO] {
-      def create(orderId: String, amountCents: Int): IO[Payment] =
+      def create(orderId: OrderId, amountCents: Int): IO[Payment] =
         IO.raiseError(error)
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
-      def recordVoid(orderId: String): IO[Option[Payment]] =
+      def recordVoid(orderId: OrderId): IO[Option[Payment]] =
         IO.raiseError(error)
       def delete(id: PaymentId): IO[Boolean] = IO.raiseError(error)
       def ping: IO[Boolean] = IO.raiseError(error)
-      def findByOrderId(orderId: String): IO[Option[Payment]] =
+      def findByOrderId(orderId: OrderId): IO[Option[Payment]] =
         IO.raiseError(error)
       def recordAuthorization(
-          orderId: String,
+          orderId: OrderId,
           amountCents: Int,
           paymentMethodId: PaymentMethodId,
           authorization: Authorization
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
       def recordDecline(
-          orderId: String,
+          orderId: OrderId,
           amountCents: Int,
           paymentMethodId: PaymentMethodId,
           reason: DeclineReason
       ): IO[Option[Payment]] = IO.raiseError(new NotImplementedError)
-      def recordCapture(orderId: String): IO[Option[Payment]] =
+      def recordCapture(orderId: OrderId): IO[Option[Payment]] =
         IO.raiseError(error)
       def recordCaptureFailure(
-          orderId: String,
+          orderId: OrderId,
           reason: String
       ): IO[Option[Payment]] = IO.raiseError(error)
     }
@@ -423,7 +425,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
         )
       }
       persisted <- List("order-zero", "order-negative", "  ")
-        .traverse(store.findByOrderId)
+        .traverse(o => store.findByOrderId(OrderId.trusted(o)))
     } yield {
       assertEquals(responses.map(_.status), List.fill(3)(Status.BadRequest))
       assertEquals(persisted.flatten, Nil)

@@ -1,7 +1,9 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import munit.FunSuite
-import paymentservice.domain.{PaymentId, PaymentMethodId}
+import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 
 class PaymentIdSuite extends FunSuite {
 
@@ -26,5 +28,14 @@ class PaymentIdSuite extends FunSuite {
 
   test("PaymentMethodId.parse rejects a malformed id") {
     assert(PaymentMethodId.parse("not-a-uuid").isLeft)
+  }
+
+  test("OrderId.parse accepts a non-blank id and render round-trips it") {
+    assertEquals(OrderId.parse("order-1").map(OrderId.render), Right("order-1"))
+  }
+
+  test("OrderId.parse rejects a blank id") {
+    assert(OrderId.parse("").isLeft)
+    assert(OrderId.parse("   ").isLeft)
   }
 }

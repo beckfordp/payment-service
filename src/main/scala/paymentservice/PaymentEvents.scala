@@ -9,8 +9,9 @@ import java.time.Instant
 /** Payload shapes pinned in `gluon/docs/system-design.md`'s "Payload contracts"
   * section - that cross-repo doc, not these case classes, is the source of
   * truth. All four are published on `payment-events` via this service's own
-  * `outbox_events` table + Debezium CDC; the producers land with Checkout
-  * Journeys 1/4/5, so nothing writes them yet.
+  * `outbox_events` table + Debezium CDC. `PaymentAuthorized` (Journey 1) and
+  * `PaymentCaptured`/`PaymentFailed` (Journey 4) are written today;
+  * `PaymentAuthorizationExpired` lands with Journey 5's expiry sweep.
   */
 
 /** Published as an async side effect of the synchronous `POST

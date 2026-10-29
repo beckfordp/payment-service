@@ -1,8 +1,10 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import cats.effect.IO
 import munit.CatsEffectSuite
-import paymentservice.domain.{PaymentId, PaymentMethodId}
+import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 
 import java.time.Instant
 import java.util.UUID
@@ -137,7 +139,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
       found <- store.findByOrderId("order-1")
       missing <- store.findByOrderId("order-unknown")
     } yield {
-      assertEquals(found.map(_.orderId), Some("order-1"))
+      assertEquals(found.map(_.orderId), Some(OrderId.trusted("order-1")))
       assertEquals(found.map(_.status), Some(PaymentStatus.Authorized))
       assertEquals(missing, None)
     }

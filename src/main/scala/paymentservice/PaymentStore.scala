@@ -1,10 +1,12 @@
 package paymentservice
 
-import cats.effect.{Async, Ref, Resource, Sync}
+import cats.Monad
+import cats.effect.{Async, Clock, Ref, Resource, Sync}
+import cats.effect.std.UUIDGen
 import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
-import paymentservice.domain.{PaymentId, PaymentMethodId}
+import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 import io.circe.syntax._
 import org.typelevel.otel4s.metrics.Meter
 import skunk.{Codec, Session}
@@ -22,7 +24,7 @@ import java.util.UUID
   */
 final case class Payment(
     id: PaymentId,
-    orderId: String,
+    orderId: OrderId,
     amountCents: Int,
     status: PaymentStatus,
     createdAt: Instant,
@@ -36,7 +38,7 @@ final case class Payment(
 trait PaymentStore[F[_]] {
 
   /** Raises [[PaymentAlreadyExists]] when the order already has a payment. */
-  def create(orderId: String, amountCents: Int): F[Payment]
+  def create(orderId: OrderId, amountCents: Int): F[Payment]
   def get(id: PaymentId): F[Option[Payment]]
   def delete(id: PaymentId): F[Boolean]
   def ping: F[Boolean]
@@ -45,7 +47,7 @@ trait PaymentStore[F[_]] {
     * `POST /payments/authorize` to replay a prior outcome instead of placing a
     * second hold.
     */
-  def findByOrderId(orderId: String): F[Option[Payment]]
+  def findByOrderId(orderId: OrderId): F[Option[Payment]]
 
   /** Persists an `Authorized` payment and its `payment-events:
     * PaymentAuthorized` outbox row in one transaction (ADR 0008/0011). `None`
@@ -53,7 +55,7 @@ trait PaymentStore[F[_]] {
     * and no outbox row is emitted.
     */
   def recordAuthorization(
-      orderId: String,
+      orderId: OrderId,
       amountCents: Int,
       paymentMethodId: PaymentMethodId,
       authorization: Authorization
@@ -64,7 +66,7 @@ trait PaymentStore[F[_]] {
     * conflict, same as `recordAuthorization`.
     */
   def recordDecline(
-      orderId: String,
+      orderId: OrderId,
       amountCents: Int,
       paymentMethodId: PaymentMethodId,
       reason: DeclineReason
@@ -76,19 +78,19 @@ trait PaymentStore[F[_]] {
     * duplicate `DispatchConfirmed` or an unknown order) or the authorization
     * has expired, and nothing is written.
     */
-  def recordCapture(orderId: String): F[Option[Payment]]
+  def recordCapture(orderId: OrderId): F[Option[Payment]]
 
   /** Atomically transitions an `Authorized` payment to `Failed`, stores the
     * reason, and writes its `PaymentFailed` outbox row (US-19.1). Same `None`
     * semantics as `recordCapture`.
     */
-  def recordCaptureFailure(orderId: String, reason: String): F[Option[Payment]]
+  def recordCaptureFailure(orderId: OrderId, reason: String): F[Option[Payment]]
 
   /** Atomically transitions an `Authorized` payment to `Voided` (US-18.2). A
     * void publishes nothing, so no outbox row. Same `None` semantics as
     * `recordCapture`.
     */
-  def recordVoid(orderId: String): F[Option[Payment]]
+  def recordVoid(orderId: OrderId): F[Option[Payment]]
 }
 
 object PaymentStore {
@@ -100,61 +102,61 @@ object PaymentStore {
     * `orderId` - the same choice order-service makes for its own events. Built
     * once here for both interpreters.
     */
-  private def authorizedEnvelope[F[_]: Sync](
-      orderId: String,
+  private def authorizedEnvelope[F[_]: Monad: Clock: UUIDGen](
+      orderId: OrderId,
       authorization: Authorization
   ): F[EventEnvelope] =
     for {
-      eventId <- Sync[F].delay(UUID.randomUUID().toString)
-      timestamp <- Sync[F].realTimeInstant
+      eventId <- UUIDGen[F].randomUUID.map(_.toString)
+      timestamp <- Clock[F].realTimeInstant
     } yield EventEnvelope(
       eventId = eventId,
       eventType = "PaymentAuthorized",
       timestamp = timestamp,
       source = eventSource,
-      correlationId = orderId,
+      correlationId = OrderId.render(orderId),
       payload = PaymentAuthorizedEvent(
-        orderId,
+        OrderId.render(orderId),
         authorization.authId,
         authorization.expiresAt,
         timestamp
       ).asJson
     )
 
-  private def capturedEnvelope[F[_]: Sync](
+  private def capturedEnvelope[F[_]: Monad: Clock: UUIDGen](
       payment: Payment
   ): F[EventEnvelope] =
     for {
-      eventId <- Sync[F].delay(UUID.randomUUID().toString)
-      timestamp <- Sync[F].realTimeInstant
+      eventId <- UUIDGen[F].randomUUID.map(_.toString)
+      timestamp <- Clock[F].realTimeInstant
     } yield EventEnvelope(
       eventId = eventId,
       eventType = "PaymentCaptured",
       timestamp = timestamp,
       source = eventSource,
-      correlationId = payment.orderId,
+      correlationId = OrderId.render(payment.orderId),
       payload = PaymentCapturedEvent(
-        payment.orderId,
+        OrderId.render(payment.orderId),
         payment.amountCents,
         timestamp
       ).asJson
     )
 
-  private def captureFailedEnvelope[F[_]: Sync](
+  private def captureFailedEnvelope[F[_]: Monad: Clock: UUIDGen](
       payment: Payment,
       reason: String
   ): F[EventEnvelope] =
     for {
-      eventId <- Sync[F].delay(UUID.randomUUID().toString)
-      timestamp <- Sync[F].realTimeInstant
+      eventId <- UUIDGen[F].randomUUID.map(_.toString)
+      timestamp <- Clock[F].realTimeInstant
     } yield EventEnvelope(
       eventId = eventId,
       eventType = "PaymentFailed",
       timestamp = timestamp,
       source = eventSource,
-      correlationId = payment.orderId,
+      correlationId = OrderId.render(payment.orderId),
       payload = PaymentFailedEvent(
-        payment.orderId,
+        OrderId.render(payment.orderId),
         PaymentId.render(payment.id),
         payment.amountCents,
         reason,
@@ -169,6 +171,9 @@ object PaymentStore {
   private val paymentStatus: Codec[PaymentStatus] =
     text.eimap(PaymentStatus.fromString)(_.asString)
 
+  private val orderId: Codec[OrderId] =
+    text.imap(OrderId.trusted)(OrderId.render)
+
   def inMemory[F[_]: Sync]: F[PaymentStore[F]] =
     inMemoryWithOutbox[F].map(_._1)
 
@@ -182,7 +187,7 @@ object PaymentStore {
       outboxRef <- Ref.of[F, List[(String, EventEnvelope)]](Nil)
     } yield {
       def insert(
-          orderId: String,
+          orderId: OrderId,
           amountCents: Int,
           status: PaymentStatus,
           fill: Payment => Payment
@@ -195,7 +200,7 @@ object PaymentStore {
         } yield entity
 
       val store = new PaymentStore[F] {
-        def create(orderId: String, amountCents: Int): F[Payment] =
+        def create(orderId: OrderId, amountCents: Int): F[Payment] =
           for {
             id <- Sync[F].delay(PaymentId.fromUuid(java.util.UUID.randomUUID()))
             now <- Sync[F].realTimeInstant
@@ -218,11 +223,11 @@ object PaymentStore {
 
         def ping: F[Boolean] = Sync[F].pure(true)
 
-        def findByOrderId(orderId: String): F[Option[Payment]] =
+        def findByOrderId(orderId: OrderId): F[Option[Payment]] =
           ref.get.map(_.values.find(_.orderId == orderId))
 
         def recordAuthorization(
-            orderId: String,
+            orderId: OrderId,
             amountCents: Int,
             paymentMethodId: PaymentMethodId,
             authorization: Authorization
@@ -242,12 +247,14 @@ object PaymentStore {
                     expiresAt = Some(authorization.expiresAt)
                   )
                 )
-                _ <- outboxRef.update(_ :+ (orderId -> envelope))
+                _ <- outboxRef.update(
+                  _ :+ (OrderId.render(orderId) -> envelope)
+                )
               } yield Some(payment)
           }
 
         def recordDecline(
-            orderId: String,
+            orderId: OrderId,
             amountCents: Int,
             paymentMethodId: PaymentMethodId,
             reason: DeclineReason
@@ -271,7 +278,7 @@ object PaymentStore {
           * `PaymentStatus.transition` allows.
           */
         private def transitionFromAuthorized(
-            orderId: String,
+            orderId: OrderId,
             status: PaymentStatus,
             reason: Option[String],
             envelope: Option[Payment => F[EventEnvelope]]
@@ -300,13 +307,15 @@ object PaymentStore {
               envelope
                 .traverse_(
                   _(payment)
-                    .flatMap(env => outboxRef.update(_ :+ (orderId -> env)))
+                    .flatMap(env =>
+                      outboxRef.update(_ :+ (OrderId.render(orderId) -> env))
+                    )
                 )
                 .as(payment)
             }
           } yield result
 
-        def recordCapture(orderId: String): F[Option[Payment]] =
+        def recordCapture(orderId: OrderId): F[Option[Payment]] =
           transitionFromAuthorized(
             orderId,
             PaymentStatus.Captured,
@@ -315,7 +324,7 @@ object PaymentStore {
           )
 
         def recordCaptureFailure(
-            orderId: String,
+            orderId: OrderId,
             reason: String
         ): F[Option[Payment]] =
           transitionFromAuthorized(
@@ -325,14 +334,14 @@ object PaymentStore {
             Some(captureFailedEnvelope[F](_, reason))
           )
 
-        def recordVoid(orderId: String): F[Option[Payment]] =
+        def recordVoid(orderId: OrderId): F[Option[Payment]] =
           transitionFromAuthorized(orderId, PaymentStatus.Voided, None, None)
       }
       (store, outboxRef)
     }
 
   private type PaymentRow = (
-      String,
+      OrderId,
       Int,
       PaymentStatus,
       OffsetDateTime,
@@ -344,7 +353,7 @@ object PaymentStore {
   )
 
   private val paymentRow: skunk.Decoder[PaymentRow] =
-    text *: int4 *: paymentStatus *: timestamptz *: timestamptz *:
+    orderId *: int4 *: paymentStatus *: timestamptz *: timestamptz *:
       uuid.opt *: text.opt *: timestamptz.opt *: text.opt
 
   private def toPayment(id: PaymentId, row: PaymentRow): Payment = {
@@ -374,12 +383,12 @@ object PaymentStore {
   }
 
   private val insertPayment: skunk.Query[
-    (UUID, String, Int, PaymentStatus),
+    (UUID, OrderId, Int, PaymentStatus),
     (OffsetDateTime, OffsetDateTime)
   ] =
     sql"""
       INSERT INTO "payment" (id, order_id, amount_cents, status)
-      VALUES ($uuid, $text, $int4, $paymentStatus)
+      VALUES ($uuid, $orderId, $int4, $paymentStatus)
       ON CONFLICT (order_id) DO NOTHING
       RETURNING created_at, updated_at
     """.query(timestamptz *: timestamptz)
@@ -387,7 +396,7 @@ object PaymentStore {
   private val insertAuthorizeOutcome: skunk.Query[
     (
         UUID,
-        String,
+        OrderId,
         Int,
         PaymentStatus,
         UUID,
@@ -401,7 +410,7 @@ object PaymentStore {
       INSERT INTO "payment"
         (id, order_id, amount_cents, status, payment_method_id, auth_id,
          expires_at, decline_reason)
-      VALUES ($uuid, $text, $int4, $paymentStatus, $uuid, ${text.opt},
+      VALUES ($uuid, $orderId, $int4, $paymentStatus, $uuid, ${text.opt},
               ${timestamptz.opt}, ${text.opt})
       ON CONFLICT (order_id) DO NOTHING
       RETURNING order_id, amount_cents, status, created_at, updated_at,
@@ -417,7 +426,7 @@ object PaymentStore {
     """.query(paymentRow)
 
   private val paymentWithIdRow: skunk.Decoder[(UUID, PaymentRow)] =
-    (uuid *: text *: int4 *: paymentStatus *: timestamptz *: timestamptz *:
+    (uuid *: orderId *: int4 *: paymentStatus *: timestamptz *: timestamptz *:
       uuid.opt *: text.opt *: timestamptz.opt *: text.opt)
       .map {
         case (
@@ -448,12 +457,12 @@ object PaymentStore {
           )
       }
 
-  private val selectPaymentByOrderId: skunk.Query[String, (UUID, PaymentRow)] =
+  private val selectPaymentByOrderId: skunk.Query[OrderId, (UUID, PaymentRow)] =
     sql"""
       SELECT id, order_id, amount_cents, status, created_at, updated_at,
              payment_method_id, auth_id, expires_at, decline_reason
       FROM "payment"
-      WHERE order_id = $text
+      WHERE order_id = $orderId
     """.query(paymentWithIdRow)
 
   /** Conditional `expected -> status` transition. The `WHERE status = expected`
@@ -463,7 +472,7 @@ object PaymentStore {
     *   - captures only.
     */
   private val transitionPayment: skunk.Query[
-    (PaymentStatus, Option[String], String, PaymentStatus, Boolean),
+    (PaymentStatus, Option[String], OrderId, PaymentStatus, Boolean),
     (UUID, PaymentRow)
   ] =
     sql"""
@@ -471,7 +480,7 @@ object PaymentStore {
       SET status = $paymentStatus,
           decline_reason = COALESCE(${text.opt}, decline_reason),
           updated_at = now()
-      WHERE order_id = $text AND status = $paymentStatus
+      WHERE order_id = $orderId AND status = $paymentStatus
         AND (NOT $bool OR expires_at > now())
       RETURNING id, order_id, amount_cents, status, created_at, updated_at,
                 payment_method_id, auth_id, expires_at, decline_reason
@@ -517,7 +526,7 @@ object PaymentStore {
             import timer.timed
 
             def insertOutcome(
-                orderId: String,
+                orderId: OrderId,
                 amountCents: Int,
                 status: PaymentStatus,
                 paymentMethodId: PaymentMethodId,
@@ -562,7 +571,7 @@ object PaymentStore {
                                         _.execute(
                                           (
                                             outboxId,
-                                            orderId,
+                                            OrderId.render(orderId),
                                             envelope,
                                             envelope.correlationId
                                           )
@@ -578,7 +587,7 @@ object PaymentStore {
               } yield row.map(toPayment(PaymentId.fromUuid(id), _))
 
             new PaymentStore[F] {
-              def create(orderId: String, amountCents: Int): F[Payment] =
+              def create(orderId: OrderId, amountCents: Int): F[Payment] =
                 for {
                   id <- Sync[F].delay(UUID.randomUUID())
                   inserted <- timed("insert") {
@@ -630,7 +639,7 @@ object PaymentStore {
                   pool.use(_.unique(pingQuery))
                 }.attempt.map(_.isRight)
 
-              def findByOrderId(orderId: String): F[Option[Payment]] =
+              def findByOrderId(orderId: OrderId): F[Option[Payment]] =
                 timed("select") {
                   pool.use { session =>
                     session
@@ -642,7 +651,7 @@ object PaymentStore {
                 })
 
               def recordAuthorization(
-                  orderId: String,
+                  orderId: OrderId,
                   amountCents: Int,
                   paymentMethodId: PaymentMethodId,
                   authorization: Authorization
@@ -662,7 +671,7 @@ object PaymentStore {
                 }
 
               def recordDecline(
-                  orderId: String,
+                  orderId: OrderId,
                   amountCents: Int,
                   paymentMethodId: PaymentMethodId,
                   reason: DeclineReason
@@ -679,7 +688,7 @@ object PaymentStore {
                 )
 
               private def transitionFromAuthorized(
-                  orderId: String,
+                  orderId: OrderId,
                   status: PaymentStatus,
                   reason: Option[String],
                   envelope: Option[Payment => F[EventEnvelope]]
@@ -717,7 +726,7 @@ object PaymentStore {
                                       _.execute(
                                         (
                                           outboxId,
-                                          orderId,
+                                          OrderId.render(orderId),
                                           event,
                                           event.correlationId
                                         )
@@ -731,7 +740,7 @@ object PaymentStore {
                   }
                 }
 
-              def recordCapture(orderId: String): F[Option[Payment]] =
+              def recordCapture(orderId: OrderId): F[Option[Payment]] =
                 transitionFromAuthorized(
                   orderId,
                   PaymentStatus.Captured,
@@ -740,7 +749,7 @@ object PaymentStore {
                 )
 
               def recordCaptureFailure(
-                  orderId: String,
+                  orderId: OrderId,
                   reason: String
               ): F[Option[Payment]] =
                 transitionFromAuthorized(
@@ -750,7 +759,7 @@ object PaymentStore {
                   Some(captureFailedEnvelope[F](_, reason))
                 )
 
-              def recordVoid(orderId: String): F[Option[Payment]] =
+              def recordVoid(orderId: OrderId): F[Option[Payment]] =
                 transitionFromAuthorized(
                   orderId,
                   PaymentStatus.Voided,

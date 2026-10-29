@@ -27,21 +27,17 @@ sbt run                # runs migrations, then starts the service on :8080
 Then, in another terminal:
 
 ```
-# Create a payment
+# Create a payment (one per order: a second POST for the same orderId is 409;
+# amountCents must be positive)
 curl -X POST http://localhost:8080/payments \
-  -H "Content-Type: application/json" -d '{"item":"widget","quantity":3}'
+  -H "Content-Type: application/json" -d '{"orderId":"order-1","amountCents":4999}'
 
 # Read it back (substitute the id from the response above)
 curl http://localhost:8080/payments/<id>
 
-# Partially update it (quantity/status)
-curl -X PATCH http://localhost:8080/payments/<id> \
-  -H "Content-Type: application/json" -d '{"quantity":5,"status":"shipped"}'
-
-# Or fully replace it (same required fields as PATCH — this resource has no
-# other client-writable ones — but PUT is idempotent full-replace semantics)
-curl -X PUT http://localhost:8080/payments/<id> \
-  -H "Content-Type: application/json" -d '{"quantity":5,"status":"shipped"}'
+# There is no PATCH/PUT: status is server-owned and only moves through the
+# lifecycle (authorize, capture/void on fulfilment-events) - see
+# PaymentStatus.transition.
 
 # Delete it
 curl -X DELETE http://localhost:8080/payments/<id>

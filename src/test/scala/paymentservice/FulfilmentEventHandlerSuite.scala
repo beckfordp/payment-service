@@ -1,12 +1,14 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import cats.effect.{IO, Ref}
 import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.otel4s.metrics.Meter
-import paymentservice.domain.PaymentId
+import paymentservice.domain.{OrderId, PaymentId}
 import purekafka.consumer.DeadLetter
 import purekafka.resilience.{
   CircuitBreakerConfig,
@@ -54,27 +56,27 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   /** Delegates to `underlying`; tests override the one write they sabotage. */
   private class Delegating(underlying: PaymentStore[IO])
       extends PaymentStore[IO] {
-    def create(o: String, a: Int) = underlying.create(o, a)
+    def create(o: OrderId, a: Int) = underlying.create(o, a)
     def get(id: PaymentId) = underlying.get(id)
     def delete(id: PaymentId) = underlying.delete(id)
     def ping = underlying.ping
-    def findByOrderId(o: String) = underlying.findByOrderId(o)
+    def findByOrderId(o: OrderId) = underlying.findByOrderId(o)
     def recordAuthorization(
-        o: String,
+        o: OrderId,
         a: Int,
         m: paymentservice.domain.PaymentMethodId,
         auth: Authorization
     ) = underlying.recordAuthorization(o, a, m, auth)
     def recordDecline(
-        o: String,
+        o: OrderId,
         a: Int,
         m: paymentservice.domain.PaymentMethodId,
         r: DeclineReason
     ) = underlying.recordDecline(o, a, m, r)
-    def recordCapture(o: String) = underlying.recordCapture(o)
-    def recordCaptureFailure(o: String, r: String) =
+    def recordCapture(o: OrderId) = underlying.recordCapture(o)
+    def recordCaptureFailure(o: OrderId, r: String) =
       underlying.recordCaptureFailure(o, r)
-    def recordVoid(o: String) = underlying.recordVoid(o)
+    def recordVoid(o: OrderId) = underlying.recordVoid(o)
   }
 
   private final case class Fixture(
@@ -145,7 +147,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
       dl <- deadLetter(dlq)
       store = new Delegating(f.store) {
-        override def recordCapture(o: String) = IO.pure(None)
+        override def recordCapture(o: OrderId) = IO.pure(None)
       }
       raw = confirmed(f.orderId)
       _ <- handle(store, f.methods, dl)(f.orderId, raw)
@@ -162,7 +164,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
       dl <- deadLetter(dlq)
       store = new Delegating(f.store) {
-        override def recordCaptureFailure(o: String, r: String) = IO.pure(None)
+        override def recordCaptureFailure(o: OrderId, r: String) = IO.pure(None)
       }
       declining = new PaymentGatewayClient[IO] {
         def authorize(t: String, a: Int) = gateway.authorize(t, a)
@@ -184,7 +186,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
       dl <- deadLetter(dlq)
       store = new Delegating(f.store) {
-        override def recordVoid(o: String) = IO.pure(None)
+        override def recordVoid(o: OrderId) = IO.pure(None)
       }
       _ <- handle(store, f.methods, dl)(f.orderId, failed(f.orderId))
       routed <- dlq.get
@@ -201,7 +203,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       attempts <- Ref.of[IO, Int](0)
       captures <- Ref.of[IO, List[String]](Nil)
       store = new Delegating(f.store) {
-        override def recordCapture(o: String) =
+        override def recordCapture(o: OrderId) =
           attempts.getAndUpdate(_ + 1).flatMap { n =>
             if (n == 0) IO.raiseError(new RuntimeException("db down"))
             else f.store.recordCapture(o)
@@ -312,5 +314,39 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       assertEquals(captured, Nil)
       assertEquals(after.map(_.status), Some(PaymentStatus.Authorized))
     }
+  }
+
+  test("DispatchConfirmed after a void is skipped without a capture") {
+    for {
+      f <- fixture
+      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dl <- deadLetter(dlq)
+      captures <- Ref.of[IO, List[String]](Nil)
+      counting = new PaymentGatewayClient[IO] {
+        def authorize(t: String, a: Int) = gateway.authorize(t, a)
+        def capture(authId: String, t: String) =
+          captures.update(_ :+ authId) *> gateway.capture(authId, t)
+        def void(authId: String) = gateway.void(authId)
+      }
+      _ <- handle(f.store, f.methods, dl, counting)(
+        f.orderId,
+        failed(f.orderId)
+      )
+      _ <- handle(f.store, f.methods, dl, counting)(
+        f.orderId,
+        confirmed(f.orderId)
+      )
+      routed <- dlq.get
+      captured <- captures.get
+      after <- f.store.findByOrderId(f.orderId)
+    } yield {
+      assertEquals(routed, Nil)
+      assertEquals(captured, Nil)
+      assertEquals(after.map(_.status), Some(PaymentStatus.Voided))
+    }
+  }
+
+  test("an event with a blank orderId is dead-lettered raw") {
+    assertDeadLettered(confirmed("  "))
   }
 }

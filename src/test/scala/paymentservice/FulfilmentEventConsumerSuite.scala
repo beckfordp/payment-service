@@ -1,5 +1,7 @@
 package paymentservice
 
+import paymentservice.TestConversions.given
+import scala.language.implicitConversions
 import cats.effect.{IO, Ref}
 import com.dimafeng.testcontainers.KafkaContainer
 import com.dimafeng.testcontainers.munit.TestContainerForAll
@@ -7,7 +9,7 @@ import fs2.kafka._
 import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
-import paymentservice.domain.PaymentMethodId
+import paymentservice.domain.{OrderId, PaymentMethodId}
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.log4cats.testing.StructuredTestingLogger
@@ -240,11 +242,11 @@ class FulfilmentEventConsumerSuite
         methods <- PaymentMethodStore.inMemory[IO]
         s <- spy()
         created <- store.create("order-pending", 1000)
-        event = DispatchFailedEvent(created.orderId, "damaged")
+        event = DispatchFailedEvent(OrderId.render(created.orderId), "damaged")
         _ <-
           produce(
             config,
-            created.orderId,
+            OrderId.render(created.orderId),
             envelopeJson("DispatchFailed", event.asJson)
           )
         _ <- runConsumer(
@@ -357,10 +359,10 @@ class FulfilmentEventConsumerSuite
         methods <- PaymentMethodStore.inMemory[IO]
         s <- spy()
         created <- store.create("order-pending", 1000)
-        event = dispatchConfirmed(created.orderId)
+        event = dispatchConfirmed(OrderId.render(created.orderId))
         _ <- produce(
           config,
-          created.orderId,
+          OrderId.render(created.orderId),
           envelopeJson("DispatchConfirmed", event.asJson)
         )
         _ <- runConsumer(
