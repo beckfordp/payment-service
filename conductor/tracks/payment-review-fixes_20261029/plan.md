@@ -7,11 +7,11 @@
 - [x] Refactor: exhaustive match over `PaymentStatus` in `AuthorizeRoutes` (no catch-all); update fixtures. — 036e1fb
 - [x] Task: Conductor - User Manual Verification 'Phase 1 — Pure lifecycle' (Protocol in workflow.md) — covered by suite (168 green, incl. Postgres testcontainers)
 
-## Phase 2 — Gateway atomicity and cancellation (FR-2, FR-4)
+## Phase 2 — Gateway atomicity and cancellation (FR-2, FR-4) [checkpoint: b9aad38]
 
-- [ ] Write failing tests: simulated gateway capture/void idempotent by authId; recordCapture `None` / write failure raises (handler fails → DLQ path) for capture and void; repeat delivery after DB failure captures once; authorize cancelled after gateway success voids hold (`TestControl`/`Deferred` cancel); confirm failure.
-- [ ] Implement idempotent simulated gateway (`Ref[Map[authId, outcome]]`); raise typed error on `None`/failure in `FulfilmentEventConsumer`; `guaranteeCase` void in `AuthorizeRoutes`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2 — Gateway atomicity' (Protocol in workflow.md)
+- [x] Write failing tests: simulated gateway capture/void idempotent by authId; recordCapture `None` / write failure raises (handler fails → DLQ path) for capture and void; repeat delivery after DB failure captures once; authorize cancelled after gateway success voids hold (`TestControl`/`Deferred` cancel); confirm failure. — b9aad38 (`FulfilmentEventHandlerSuite`, broker-free via extracted `handle`)
+- [x] Implement idempotent simulated gateway (deviation: simulator outcome is already a pure function of card token, so no `Ref` ledger - contract documented + tested); raise `UnrecordedTransition` on `None` in `FulfilmentEventConsumer`; `guaranteeCase` void in `AuthorizeRoutes`. — b9aad38
+- [x] Task: Conductor - User Manual Verification 'Phase 2 — Gateway atomicity' (Protocol in workflow.md) — covered by suite (176 green)
 
 ## Phase 3 — Event DLQ, expiry, create validation (FR-3, FR-6, FR-7)
 
