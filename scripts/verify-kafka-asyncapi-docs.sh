@@ -118,7 +118,15 @@ done
 
 echo
 echo "7. Checking the live static HTML route (/docs/asyncapi/) for the same content..."
-if ! curl -s "${PAYMENT_SERVICE_URL}/docs/asyncapi/index.html" | grep -q "PaymentAuthorized"; then
+ok=0
+for _ in $(seq 1 30); do
+  if curl -s "${PAYMENT_SERVICE_URL}/docs/asyncapi/index.html" | grep -q "PaymentAuthorized"; then
+    ok=1
+    break
+  fi
+  sleep 1
+done
+if [ "$ok" -ne 1 ]; then
   echo "FAIL: live static HTML route missing expected content: PaymentAuthorized" >&2
   FAILED=1
 else
