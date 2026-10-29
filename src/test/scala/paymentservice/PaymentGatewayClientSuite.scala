@@ -105,4 +105,22 @@ class PaymentGatewayClientSuite extends CatsEffectSuite {
       assert(GatewayOutcome.parse(raw).isLeft, raw)
     }
   }
+
+  test("capture is idempotent by authId: a repeat returns the first outcome") {
+    for {
+      first <- gateway.capture("auth_1", "tok_mastercard_4444")
+      again <- gateway.capture("auth_1", "tok_mastercard_4444")
+      approved <- gateway.capture("auth_2", "tok_visa_4242")
+      approvedAgain <- gateway.capture("auth_2", "tok_visa_4242")
+    } yield {
+      assertEquals(first, Left(DeclineReason("capture_declined")))
+      assertEquals(again, first)
+      assertEquals(approved, Right(()))
+      assertEquals(approvedAgain, approved)
+    }
+  }
+
+  test("void is idempotent: a repeat void succeeds") {
+    gateway.void("auth_1") *> gateway.void("auth_1")
+  }
 }

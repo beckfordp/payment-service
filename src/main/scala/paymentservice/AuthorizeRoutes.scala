@@ -1,7 +1,7 @@
 package paymentservice
 
-import cats.MonadThrow
-import cats.effect.Async
+import cats.effect.{Async, MonadCancelThrow, Outcome}
+import cats.effect.syntax.all._
 import cats.syntax.all._
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
@@ -132,7 +132,7 @@ object AuthorizeRoutes {
       _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
     } yield ()
 
-  def authorizeServerEndpoint[F[_]: MonadThrow](
+  def authorizeServerEndpoint[F[_]: MonadCancelThrow](
       payments: PaymentStore[F],
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
@@ -210,7 +210,7 @@ object AuthorizeRoutes {
           methodId: PaymentMethodId
       ): F[Either[AuthorizeError, AuthorizePaymentResponse]] = {
         val release = voidedAuthId match {
-          case None         => MonadThrow[F].unit
+          case None         => MonadCancelThrow[F].unit
           case Some(authId) =>
             gateway.void(authId).handleErrorWith { error =>
               logger.warn(context + ("auth_id" -> authId), error)(
@@ -252,8 +252,19 @@ object AuthorizeRoutes {
                     authorization
                   )
                   // Don't leave an unrecorded hold at the gateway if persisting
-                  // the authorization fails - release it before the 500.
-                  .onError { case _ => gateway.void(authorization.authId) }
+                  // the authorization fails or the request is cancelled -
+                  // release it (`onError` alone misses `Canceled`).
+                  .guaranteeCase {
+                    case Outcome.Succeeded(_) => MonadCancelThrow[F].unit
+                    case _                    =>
+                      gateway.void(authorization.authId).handleErrorWith {
+                        error =>
+                          logger.warn(
+                            context + ("auth_id" -> authorization.authId),
+                            error
+                          )("Releasing the unrecorded authorization failed")
+                      }
+                  }
                   .flatMap {
                     case Some(payment) =>
                       logger

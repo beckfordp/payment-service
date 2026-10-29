@@ -523,4 +523,53 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       assertEquals(released.size, 1)
     }
   }
+
+  test(
+    "POST /payments/authorize cancelled while recording voids the fresh hold"
+  ) {
+    for {
+      f <- fixture
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      recording <- cats.effect.Deferred[IO, Unit]
+      hangingStore = new PaymentStore[IO] {
+        def create(o: String, a: Int) = f.payments.create(o, a)
+        def get(id: PaymentId) = f.payments.get(id)
+        def recordVoid(o: String) = f.payments.recordVoid(o)
+        def delete(id: PaymentId) = f.payments.delete(id)
+        def ping = f.payments.ping
+        def findByOrderId(o: String) = f.payments.findByOrderId(o)
+        def recordAuthorization(
+            o: String,
+            a: Int,
+            m: PaymentMethodId,
+            auth: Authorization
+        ) = recording.complete(()) *> IO.never
+        def recordDecline(
+            o: String,
+            a: Int,
+            m: PaymentMethodId,
+            r: DeclineReason
+        ) = f.payments.recordDecline(o, a, m, r)
+        def recordCapture(o: String) = f.payments.recordCapture(o)
+        def recordCaptureFailure(o: String, r: String) =
+          f.payments.recordCaptureFailure(o, r)
+      }
+      routes = AuthorizeRoutes.routes[IO](
+        hangingStore,
+        f.methods,
+        countingGateway(cats.effect.Ref.unsafe[IO, Int](0), voided),
+        NoOpLogger[IO]
+      )
+      fiber <- post(
+        routes,
+        AuthorizePaymentRequest("order-cancel", 4999, f.approveId)
+      ).start
+      _ <- recording.get
+      _ <- fiber.cancel
+      released <- voided.get
+    } yield {
+      assertEquals(released.size, 1)
+      assert(released.head.startsWith("auth_"), released.head)
+    }
+  }
 }

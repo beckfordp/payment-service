@@ -57,9 +57,13 @@ object DispatchConfirmedEvent {
   *     `PaymentCaptured` or - on a capture decline - `PaymentFailed {reason:
   *     capture_failed}` via the outbox.
   *
-  * Missing or non-authorized payments are logged and skipped; a gateway failure
-  * is retried through the DLQ and leaves the payment authorized. A duplicate
-  * `DispatchConfirmed` finds the payment already `captured` and no-ops.
+  * Missing or non-authorized payments are logged and skipped; a gateway or
+  * store failure is retried through the DLQ and leaves the payment authorized.
+  * A gateway call is idempotent by `authId`, so a retry after a failed store
+  * write is safe. A store write that matches no authorized row after the
+  * gateway call raises [[UnrecordedTransition]] rather than committing. A
+  * duplicate `DispatchConfirmed` finds the payment already `captured` and
+  * no-ops.
   */
 object FulfilmentEventConsumer {
 
@@ -88,178 +92,190 @@ object FulfilmentEventConsumer {
       .subscribeTo(topic)
       .records
       .evalMap { committable =>
-        def handleDispatchFailed(event: DispatchFailedEvent): F[Unit] =
-          store.findByOrderId(event.orderId).flatMap {
+        handle(store, methods, gateway, logger, deadLetter)(
+          committable.record.key.getOrElse(""),
+          committable.record.value
+        ) *> committable.offset.commit
+      }
+
+  /** One `fulfilment-events` record, minus the offset commit - split from
+    * [[run]] so the logic and its DLQ routing are testable without a broker.
+    */
+  def handle[F[_]: Async](
+      store: PaymentStore[F],
+      methods: PaymentMethodStore[F],
+      gateway: PaymentGatewayClient[F],
+      logger: StructuredLogger[F],
+      deadLetter: DeadLetter[F, String, String]
+  )(key: String, value: Option[String]): F[Unit] = {
+    def unrecorded(orderId: String, target: PaymentStatus): F[Unit] =
+      Async[F].raiseError(UnrecordedTransition(orderId, target))
+
+    def handleDispatchFailed(event: DispatchFailedEvent): F[Unit] =
+      store.findByOrderId(event.orderId).flatMap {
+        case None =>
+          logger.warn(Map("order_id" -> event.orderId))(
+            "DispatchFailed for an unknown payment - skipping"
+          )
+        case Some(payment) if payment.status != PaymentStatus.Authorized =>
+          logger.warn(
+            Map(
+              "order_id" -> event.orderId,
+              "status" -> payment.status.asString
+            )
+          )("DispatchFailed for a non-authorized payment - skipping")
+        case Some(payment) =>
+          payment.authId match {
             case None =>
-              logger.warn(Map("order_id" -> event.orderId))(
-                "DispatchFailed for an unknown payment - skipping"
-              )
-            case Some(payment) if payment.status != PaymentStatus.Authorized =>
-              logger.warn(
-                Map(
-                  "order_id" -> event.orderId,
-                  "status" -> payment.status.asString
+              Async[F].raiseError(
+                new RuntimeException(
+                  s"Authorized payment ${payment.id} has no authId"
                 )
-              )("DispatchFailed for a non-authorized payment - skipping")
-            case Some(payment) =>
-              payment.authId match {
+              )
+            case Some(authId) =>
+              gateway.void(authId) *>
+                store.recordVoid(event.orderId).flatMap {
+                  case Some(_) =>
+                    logger.info(
+                      Map("order_id" -> event.orderId)
+                    )("Authorization voided")
+                  case None =>
+                    unrecorded(event.orderId, PaymentStatus.Voided)
+                }
+          }
+      }
+
+    def handleDispatchConfirmed(event: DispatchConfirmedEvent): F[Unit] =
+      store.findByOrderId(event.orderId).flatMap {
+        case None =>
+          logger.warn(Map("order_id" -> event.orderId))(
+            "DispatchConfirmed for an unknown payment - skipping"
+          )
+        case Some(payment) if payment.status == PaymentStatus.Captured =>
+          logger.info(Map("order_id" -> event.orderId))(
+            "DispatchConfirmed for an already-captured payment - skipping duplicate"
+          )
+        case Some(payment) if payment.status != PaymentStatus.Authorized =>
+          logger.warn(
+            Map(
+              "order_id" -> event.orderId,
+              "status" -> payment.status.asString
+            )
+          )("DispatchConfirmed for a non-authorized payment - skipping")
+        case Some(payment) =>
+          (payment.authId, payment.paymentMethodId) match {
+            case (None, _) =>
+              Async[F].raiseError(
+                new RuntimeException(
+                  s"Authorized payment ${payment.id} has no authId"
+                )
+              )
+            case (_, None) =>
+              Async[F].raiseError(
+                new RuntimeException(
+                  s"Authorized payment ${payment.id} has no paymentMethodId"
+                )
+              )
+            case (Some(authId), Some(paymentMethodId)) =>
+              methods.get(paymentMethodId).flatMap {
                 case None =>
                   Async[F].raiseError(
                     new RuntimeException(
-                      s"Authorized payment ${payment.id} has no authId"
+                      s"Authorized payment ${payment.id} references unknown payment method $paymentMethodId"
                     )
                   )
-                case Some(authId) =>
-                  gateway.void(authId) *>
-                    store.recordVoid(event.orderId).flatMap {
-                      case Some(_) =>
-                        logger.info(
-                          Map("order_id" -> event.orderId)
-                        )("Authorization voided")
-                      case None =>
-                        logger.warn(
-                          Map(
-                            "payment_id" -> paymentservice.domain.PaymentId
-                              .render(payment.id)
-                          )
-                        )("Voided payment disappeared before the status update")
-                    }
-              }
-          }
-
-        def handleDispatchConfirmed(event: DispatchConfirmedEvent): F[Unit] =
-          store.findByOrderId(event.orderId).flatMap {
-            case None =>
-              logger.warn(Map("order_id" -> event.orderId))(
-                "DispatchConfirmed for an unknown payment - skipping"
-              )
-            case Some(payment) if payment.status == PaymentStatus.Captured =>
-              logger.info(Map("order_id" -> event.orderId))(
-                "DispatchConfirmed for an already-captured payment - skipping duplicate"
-              )
-            case Some(payment) if payment.status != PaymentStatus.Authorized =>
-              logger.warn(
-                Map(
-                  "order_id" -> event.orderId,
-                  "status" -> payment.status.asString
-                )
-              )("DispatchConfirmed for a non-authorized payment - skipping")
-            case Some(payment) =>
-              (payment.authId, payment.paymentMethodId) match {
-                case (None, _) =>
-                  Async[F].raiseError(
-                    new RuntimeException(
-                      s"Authorized payment ${payment.id} has no authId"
-                    )
-                  )
-                case (_, None) =>
-                  Async[F].raiseError(
-                    new RuntimeException(
-                      s"Authorized payment ${payment.id} has no paymentMethodId"
-                    )
-                  )
-                case (Some(authId), Some(paymentMethodId)) =>
-                  methods.get(paymentMethodId).flatMap {
-                    case None =>
-                      Async[F].raiseError(
-                        new RuntimeException(
-                          s"Authorized payment ${payment.id} references unknown payment method $paymentMethodId"
-                        )
-                      )
-                    case Some(method) =>
-                      gateway.capture(authId, method.cardToken).flatMap {
-                        case Right(_) =>
-                          store.recordCapture(event.orderId).flatMap {
-                            case Some(_) =>
-                              logger.info(
-                                Map("order_id" -> event.orderId)
-                              )("Payment captured")
-                            case None =>
-                              logger.warn(
-                                Map("order_id" -> event.orderId)
-                              )(
-                                "Payment was no longer authorized when the capture was recorded"
-                              )
-                          }
-                        case Left(decline) =>
-                          logger.warn(
-                            Map(
-                              "order_id" -> event.orderId,
-                              "reason" -> decline.value
-                            )
-                          )("Capture declined - recording PaymentFailed") *>
-                            store
-                              .recordCaptureFailure(
-                                event.orderId,
-                                captureFailedReason
-                              )
-                              .flatMap {
-                                case Some(_) => Async[F].unit
-                                case None    =>
-                                  logger.warn(
-                                    Map("order_id" -> event.orderId)
-                                  )(
-                                    "Payment was no longer authorized when the capture failure was recorded"
-                                  )
-                              }
+                case Some(method) =>
+                  gateway.capture(authId, method.cardToken).flatMap {
+                    case Right(_) =>
+                      store.recordCapture(event.orderId).flatMap {
+                        case Some(_) =>
+                          logger.info(
+                            Map("order_id" -> event.orderId)
+                          )("Payment captured")
+                        case None =>
+                          unrecorded(event.orderId, PaymentStatus.Captured)
                       }
+                    case Left(decline) =>
+                      logger.warn(
+                        Map(
+                          "order_id" -> event.orderId,
+                          "reason" -> decline.value
+                        )
+                      )("Capture declined - recording PaymentFailed") *>
+                        store
+                          .recordCaptureFailure(
+                            event.orderId,
+                            captureFailedReason
+                          )
+                          .flatMap {
+                            case Some(_) => Async[F].unit
+                            case None    =>
+                              unrecorded(event.orderId, PaymentStatus.Failed)
+                          }
                   }
               }
           }
+      }
 
-        val key = committable.record.key.getOrElse("")
-
-        val handled: F[Unit] = committable.record.value match {
-          case None =>
-            logger.error(Map.empty)(
-              "Received fulfilment-events record with a null value - skipping"
+    value match {
+      case None =>
+        logger.error(Map.empty)(
+          "Received fulfilment-events record with a null value - skipping"
+        )
+      case Some(raw) =>
+        decode[EventEnvelope](raw) match {
+          case Left(error) =>
+            logger.error(
+              Map("topic" -> topic, "bytes" -> raw.length.toString),
+              error
+            )(
+              "Failed to decode fulfilment-events envelope"
             )
-          case Some(raw) =>
-            decode[EventEnvelope](raw) match {
-              case Left(error) =>
-                logger.error(
-                  Map("topic" -> topic, "bytes" -> raw.length.toString),
-                  error
-                )(
-                  "Failed to decode fulfilment-events envelope"
-                )
-              case Right(envelope) =>
-                envelope.eventType match {
-                  case "DispatchFailed" =>
-                    envelope.payload.as[DispatchFailedEvent] match {
-                      case Left(error) =>
-                        logger.error(
-                          Map("topic" -> topic, "bytes" -> raw.length.toString),
-                          error
-                        )(
-                          "Failed to decode DispatchFailed payload"
-                        )
-                      case Right(event) =>
-                        deadLetter.guard(topic, key, raw)(
-                          handleDispatchFailed(event)
-                        )
-                    }
-                  case "DispatchConfirmed" =>
-                    envelope.payload.as[DispatchConfirmedEvent] match {
-                      case Left(error) =>
-                        logger.error(
-                          Map("topic" -> topic, "bytes" -> raw.length.toString),
-                          error
-                        )(
-                          "Failed to decode DispatchConfirmed payload"
-                        )
-                      case Right(event) =>
-                        deadLetter.guard(topic, key, raw)(
-                          handleDispatchConfirmed(event)
-                        )
-                    }
-                  case other =>
-                    logger.info(
-                      Map("topic" -> topic, "event_type" -> other)
-                    )("Ignoring unrelated fulfilment-events event type")
+          case Right(envelope) =>
+            envelope.eventType match {
+              case "DispatchFailed" =>
+                envelope.payload.as[DispatchFailedEvent] match {
+                  case Left(error) =>
+                    logger.error(
+                      Map("topic" -> topic, "bytes" -> raw.length.toString),
+                      error
+                    )(
+                      "Failed to decode DispatchFailed payload"
+                    )
+                  case Right(event) =>
+                    deadLetter.guard(topic, key, raw)(
+                      handleDispatchFailed(event)
+                    )
                 }
+              case "DispatchConfirmed" =>
+                envelope.payload.as[DispatchConfirmedEvent] match {
+                  case Left(error) =>
+                    logger.error(
+                      Map("topic" -> topic, "bytes" -> raw.length.toString),
+                      error
+                    )(
+                      "Failed to decode DispatchConfirmed payload"
+                    )
+                  case Right(event) =>
+                    deadLetter.guard(topic, key, raw)(
+                      handleDispatchConfirmed(event)
+                    )
+                }
+              case other =>
+                logger.info(
+                  Map("topic" -> topic, "event_type" -> other)
+                )("Ignoring unrelated fulfilment-events event type")
             }
         }
-        handled *> committable.offset.commit
-      }
+    }
+  }
 }
+
+/** The gateway call succeeded but the conditional store write matched no
+  * authorized row - raised so the record is retried / dead-lettered instead of
+  * committed with the payment out of step with the gateway.
+  */
+final case class UnrecordedTransition(orderId: String, target: PaymentStatus)
+    extends RuntimeException(
+      s"Payment for order $orderId was not authorized when recording ${target.asString}"
+    )

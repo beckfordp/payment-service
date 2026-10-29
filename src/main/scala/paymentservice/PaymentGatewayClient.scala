@@ -18,6 +18,11 @@ final case class Authorization(authId: String, expiresAt: Instant)
   * capture decline is returned as a value so it never retries through the DLQ.
   * `cardToken` is only consulted by the simulator (per-test-card capture
   * outcomes); a real provider captures by `authId` alone.
+  *
+  * `capture` and `void` must be idempotent by `authId` (a real provider via its
+  * idempotency key): the fulfilment-events consumer retries the whole handler
+  * when the store write after a gateway call fails. The simulator satisfies
+  * this trivially - its outcome is a pure function of the card token.
   */
 trait PaymentGatewayClient[F[_]] {
   def authorize(
