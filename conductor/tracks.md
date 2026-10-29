@@ -2,6 +2,9 @@
 
 This file tracks all major tracks for the project.
 
+- [ ] **Track: TD-15.3 — Cross-repo consistency hardening (payment-service)**
+  *Link: [./tracks/td15-payment-hardening_20261029/](./tracks/td15-payment-hardening_20261029/)*
+
 - [x] **Track: Transactional outbox for payment-service (TD-3.4, ADR 0008)**
   *Link: [./tracks/outbox_20261012/](./tracks/outbox_20261012/)*
 
@@ -16,6 +19,5 @@ priorities change. When ready to work on one, run `/conductor:newTrack <title>` 
 through the spec/plan questions and promote it into a real track above.
 
 - ADR: payment provider — real integration (Stripe etc.) vs. simulated
-- TD-15.3 — cross-repo consistency hardening: typed PaymentId/PaymentMethodId, unknown-event logging, raw-log redaction, ScalaCheck, narrower constraints (see `gluon/TECHNICAL_DEBT.md` TD-15)
 
 ---
