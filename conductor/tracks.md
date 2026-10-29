@@ -16,5 +16,6 @@ priorities change. When ready to work on one, run `/conductor:newTrack <title>` 
 through the spec/plan questions and promote it into a real track above.
 
 - ADR: payment provider — real integration (Stripe etc.) vs. simulated
+- TD-15.3 — cross-repo consistency hardening: typed PaymentId/PaymentMethodId, unknown-event logging, raw-log redaction, ScalaCheck, narrower constraints (see `gluon/TECHNICAL_DEBT.md` TD-15)
 
 ---
