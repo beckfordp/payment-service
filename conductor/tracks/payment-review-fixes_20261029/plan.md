@@ -26,10 +26,10 @@
 - [x] Docs: `PaymentEvents.scala`, `build.sbt:104`, `conductor/product.md` (Voided, PATCH/PUT removed), README, `verify-domain-foundations.sh`. — 8a9ba3d
 - [x] Task: Conductor - User Manual Verification 'Phase 4 — Cleanup' (Protocol in workflow.md) — covered by suite (194 green); live script run in Phase 5
 
-## Phase 5 — Verification
+## Phase 5 — Verification [checkpoint: 5e43dce]
 
-- [ ] Full suite + coverage (>80%) + scalafmtCheck; `schemaRegistryCheck`; AsyncAPI check.
-- [ ] Live verify scripts on local cluster (re-create Debezium register Job first if OrbStack restarted).
-- [ ] Task: Conductor - User Manual Verification 'Phase 5 — Verification' (Protocol in workflow.md)
+- [x] Full suite + coverage (>80%) + scalafmtCheck; `schemaRegistryCheck`; AsyncAPI check. — 194 green; 91.05% stmt / 90.59% branch; fmt clean; `verify-schema-registry-check.sh` + `verify-kafka-asyncapi-docs.sh` passed
+- [x] Live verify scripts on local cluster (re-create Debezium register Job first if OrbStack restarted). — image rebuilt + rolled out; connectors present; authorize-idempotency, capture, void, domain-foundations, checkout-authorize all passed. `verify-capture.sh` cleanup FK bug (pre-existing: methods deleted before the second order's payment row) fixed — 5e43dce
+- [x] Task: Conductor - User Manual Verification 'Phase 5 — Verification' (Protocol in workflow.md) — covered by the live scripts
 
 **Risks:** removing PATCH/PUT breaks `verify-domain-foundations.sh` (updated Phase 4); conditional SQL changes rows-affected semantics in outbox transactions; cold-build AsyncAPI plugin race (rerun once).
