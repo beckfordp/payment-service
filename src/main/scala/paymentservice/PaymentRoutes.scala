@@ -1,5 +1,6 @@
 package paymentservice
 
+import cats.{Monad, MonadThrow}
 import cats.effect.Async
 import cats.syntax.all._
 import io.circe.Codec
@@ -133,7 +134,7 @@ object PaymentRoutes {
       .out(statusCode(StatusCode.NoContent))
       .errorOut(paymentErrorOutput)
 
-  def serverEndpoint[F[_]: Async](
+  def serverEndpoint[F[_]: MonadThrow](
       store: PaymentStore[F],
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
@@ -155,7 +156,7 @@ object PaymentRoutes {
       } yield PaymentResponse(entity)
     }
 
-  def getPaymentServerEndpoint[F[_]: Async](
+  def getPaymentServerEndpoint[F[_]: Monad](
       store: PaymentStore[F],
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
@@ -186,7 +187,7 @@ object PaymentRoutes {
     * both call `PaymentStore.update` with the same required update body; only
     * the logged HTTP method differs.
     */
-  private def updateLogic[F[_]: Async](
+  private def updateLogic[F[_]: Monad](
       store: PaymentStore[F],
       logger: StructuredLogger[F],
       httpMethod: String
@@ -225,7 +226,7 @@ object PaymentRoutes {
     } yield result
   }
 
-  def updatePaymentServerEndpoint[F[_]: Async](
+  def updatePaymentServerEndpoint[F[_]: Monad](
       store: PaymentStore[F],
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
@@ -233,7 +234,7 @@ object PaymentRoutes {
       updateLogic(store, logger, "PATCH")(id, req)
     }
 
-  def replacePaymentServerEndpoint[F[_]: Async](
+  def replacePaymentServerEndpoint[F[_]: Monad](
       store: PaymentStore[F],
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
@@ -241,7 +242,7 @@ object PaymentRoutes {
       updateLogic(store, logger, "PUT")(id, req)
     }
 
-  def deletePaymentServerEndpoint[F[_]: Async](
+  def deletePaymentServerEndpoint[F[_]: Monad](
       store: PaymentStore[F],
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =

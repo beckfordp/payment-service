@@ -26,7 +26,8 @@ object AppRoutes {
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
       telemetry: Telemetry[F],
-      channels: List[AsyncApiChannel[?]]
+      channels: List[AsyncApiChannel[?]],
+      staticAsyncApiDocsDir: String
   ): HttpRoutes[F] = {
     val docsRoutes = Docs.routes[F](
       "Payment Service",
@@ -60,8 +61,6 @@ object AppRoutes {
     // a plain `sbt run` JVM process (no docker bind mount), so this reads
     // straight from the local filesystem. Mirrors order-service's/
     // inventory-service's own AppRoutes.scala.
-    val staticAsyncApiDocsDir =
-      sys.env.getOrElse("ASYNCAPI_HTML_DIR", "target/asyncapi-docs")
     val staticAsyncApiRoutes = fileService[F](
       FileService.Config(
         systemPath = staticAsyncApiDocsDir,

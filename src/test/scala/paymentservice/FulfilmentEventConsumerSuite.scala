@@ -8,7 +8,10 @@ import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
 import paymentservice.domain.PaymentMethodId
+import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.noop.NoOpLogger
+import org.typelevel.log4cats.testing.StructuredTestingLogger
+import org.typelevel.log4cats.testing.StructuredTestingLogger.INFO
 import org.typelevel.otel4s.metrics.Meter
 import purekafka.consumer.DeadLetter
 import purekafka.resilience.{
@@ -105,10 +108,11 @@ class FulfilmentEventConsumerSuite
       store: PaymentStore[IO],
       methods: PaymentMethodStore[IO],
       gateway: PaymentGatewayClient[IO],
-      deadLetter: DeadLetter[IO, String, String]
+      deadLetter: DeadLetter[IO, String, String],
+      logger: StructuredLogger[IO] = NoOpLogger[IO]
   ): IO[Unit] =
     FulfilmentEventConsumer
-      .run[IO](config, store, methods, gateway, NoOpLogger[IO], deadLetter)
+      .run[IO](config, store, methods, gateway, logger, deadLetter)
       .compile
       .drain
 
@@ -136,6 +140,57 @@ class FulfilmentEventConsumerSuite
       "TRACK-1",
       List(FulfilmentItem("sku-1", "Widget", 1, 4999))
     )
+
+  test(
+    "an unrelated event type is logged and skipped, and raw payloads are not logged"
+  ) {
+    withContainers { kafka =>
+      val config = configFor(kafka)
+      for {
+        logger = StructuredTestingLogger.impl[IO]()
+        store <- PaymentStore.inMemory[IO]
+        methods <- PaymentMethodStore.inMemory[IO]
+        deadLetter <- noOpDeadLetter
+        spy <- spy()
+        _ <- produce(
+          config,
+          "unrelated",
+          envelopeJson(
+            "PaymentAuthorized",
+            Json.obj("orderId" -> Json.fromString("unrelated"))
+          )
+        )
+        _ <- produce(
+          config,
+          "order-unrelated",
+          envelopeJson(
+            "DispatchConfirmed",
+            dispatchConfirmed("order-unrelated").asJson
+          )
+        )
+        _ <- runConsumer(
+          config,
+          store,
+          methods,
+          spy.client,
+          deadLetter,
+          logger
+        ).background
+          .use(_ => IO.sleep(3.seconds))
+        logged <- logger.logged
+      } yield {
+        val infos = logged.collect { case m: INFO => m }
+        assert(
+          infos.exists(_.ctx.get("event_type").contains("PaymentAuthorized")),
+          s"expected an ignored-event info line, got: $infos"
+        )
+        assert(
+          logged.forall(m => !m.ctx.contains("raw")),
+          s"raw payloads must never be logged, got: $logged"
+        )
+      }
+    }
+  }
 
   test("DispatchFailed voids an authorized payment exactly once") {
     withContainers { kafka =>

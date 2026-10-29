@@ -1,5 +1,6 @@
 package paymentservice
 
+import cats.MonadThrow
 import cats.effect.Async
 import cats.syntax.all._
 import io.circe.Codec
@@ -131,7 +132,7 @@ object AuthorizeRoutes {
       _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
     } yield ()
 
-  def authorizeServerEndpoint[F[_]: Async](
+  def authorizeServerEndpoint[F[_]: MonadThrow](
       payments: PaymentStore[F],
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
@@ -208,7 +209,7 @@ object AuthorizeRoutes {
           methodId: PaymentMethodId
       ): F[Either[AuthorizeError, AuthorizePaymentResponse]] = {
         val release = voidedAuthId match {
-          case None         => Async[F].unit
+          case None         => MonadThrow[F].unit
           case Some(authId) =>
             gateway.void(authId).handleErrorWith { error =>
               logger.warn(context + ("auth_id" -> authId), error)(

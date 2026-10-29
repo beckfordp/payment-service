@@ -1,6 +1,7 @@
 package paymentservice
 
-import cats.effect.Async
+import cats.{MonadThrow}
+import cats.effect.{Async, Clock}
 import cats.syntax.all._
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
@@ -96,7 +97,7 @@ object PaymentMethodRoutes {
       address <- Address.validate(req.billingAddress)
     } yield (card, address)
 
-  def createMethodServerEndpoint[F[_]: Async](
+  def createMethodServerEndpoint[F[_]: MonadThrow: Clock](
       store: PaymentMethodStore[F],
       logger: StructuredLogger[F]
   ): ServerEndpoint[Any, F] =
@@ -106,7 +107,7 @@ object PaymentMethodRoutes {
         _ <- logger.info(
           context ++ Map("method" -> "POST", "path" -> "/payments/methods")
         )("Received request")
-        now <- Async[F].realTimeInstant
+        now <- Clock[F].realTimeInstant
         result <- validate(
           req,
           YearMonth.from(now.atZone(ZoneOffset.UTC))

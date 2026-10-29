@@ -42,6 +42,7 @@ final case class PaymentServiceConfig(
     port: Int,
     metricsPort: Int,
     serviceName: String,
+    asyncApiHtmlDir: String,
     postgres: PostgresConfig,
     paymentGateway: PaymentGatewayConfig,
     kafka: KafkaConfig

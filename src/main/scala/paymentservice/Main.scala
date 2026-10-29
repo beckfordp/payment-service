@@ -50,7 +50,8 @@ object Main extends IOApp.Simple {
       methods,
       gateway,
       telemetry,
-      AsyncApiChannels.channels
+      AsyncApiChannels.channels,
+      config.asyncApiHtmlDir
     )
     _ <- EmberServerBuilder
       .default[IO]
