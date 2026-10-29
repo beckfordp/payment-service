@@ -1,0 +1,8 @@
+{
+  "track_id": "payment-review-fixes_20261029",
+  "type": "bug",
+  "status": "new",
+  "created_at": "2026-10-29T00:00:00Z",
+  "updated_at": "2026-10-29T00:00:00Z",
+  "description": "Payment-service review fixes: 4 High/3 Medium/4 Low findings from 2026-10-29 full review"
+}
