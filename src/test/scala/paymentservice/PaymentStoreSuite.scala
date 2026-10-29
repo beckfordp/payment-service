@@ -45,29 +45,6 @@ class PaymentStoreSuite extends CatsEffectSuite {
   }
 
   test(
-    "update returns the updated entity with updatedAt not moving backwards"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-      updated <- store.update(created.id, PaymentStatus.Pending)
-    } yield {
-      assertEquals(updated.map(_.id), Some(created.id))
-      assert(
-        updated.exists(!_.updatedAt.isBefore(created.updatedAt)),
-        s"expected updatedAt not to move backwards, got: $updated"
-      )
-    }
-  }
-
-  test("update returns None for an unknown id") {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      result <- store.update(unknownPaymentId, PaymentStatus.Pending)
-    } yield assertEquals(result, None)
-  }
-
-  test(
     "delete removes the entity and returns true, and get then returns None"
   ) {
     for {
@@ -268,6 +245,40 @@ class PaymentStoreSuite extends CatsEffectSuite {
       assertEquals(result, None)
       assertEquals(events, Nil)
     }
+  }
+
+  test("recordVoid marks an Authorized payment Voided and emits nothing") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      authorized <- authorizedPayment(store)
+      voided <- store.recordVoid("order-1")
+      events <- outbox.get
+    } yield {
+      assertEquals(voided.map(_.id), Some(authorized.id))
+      assertEquals(voided.map(_.status), Some(PaymentStatus.Voided))
+      assertEquals(events.map(_._2.eventType), List("PaymentAuthorized"))
+    }
+  }
+
+  test("recordVoid returns None for a non-authorized payment, unchanged") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      created <- store.create("order-1", 4999)
+      result <- store.recordVoid("order-1")
+      after <- store.get(created.id)
+    } yield {
+      assertEquals(result, None)
+      assertEquals(after.map(_.status), Some(PaymentStatus.Pending))
+    }
+  }
+
+  test("recordCapture after recordVoid returns None (voided is terminal)") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      _ <- authorizedPayment(store)
+      _ <- store.recordVoid("order-1")
+      result <- store.recordCapture("order-1")
+    } yield assertEquals(result, None)
   }
 
   test("recordCapture returns None for a non-authorized payment") {

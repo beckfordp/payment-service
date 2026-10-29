@@ -1,6 +1,7 @@
 package paymentservice
 
 import cats.effect.IO
+import cats.syntax.all._
 import munit.CatsEffectSuite
 import paymentservice.domain.{PaymentId, PaymentMethodId}
 import org.http4s.circe.CirceEntityCodec._
@@ -24,10 +25,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       def create(orderId: String, amountCents: Int): IO[Payment] =
         IO.raiseError(error)
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
-      def update(
-          id: PaymentId,
-          status: PaymentStatus
-      ): IO[Option[Payment]] =
+      def recordVoid(orderId: String): IO[Option[Payment]] =
         IO.raiseError(error)
       def delete(id: PaymentId): IO[Boolean] = IO.raiseError(error)
       def ping: IO[Boolean] = IO.raiseError(error)
@@ -164,6 +162,33 @@ class PaymentRoutesSuite extends CatsEffectSuite {
     }
   }
 
+  test("PATCH and PUT /payments/{id} are gone - status is server-owned") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
+      created <- store.create("order-1", 4999)
+      responses <- List(Method.PATCH, Method.PUT).traverse { method =>
+        routes.orNotFound.run(
+          Request[IO](method, uri"/payments" / PaymentId.render(created.id))
+            .withEntity(
+              io.circe.Json.obj(
+                "status" -> io.circe.Json.fromString("captured")
+              )
+            )
+        )
+      }
+      after <- store.get(created.id)
+    } yield {
+      responses.foreach { response =>
+        assert(
+          Set(Status.NotFound, Status.MethodNotAllowed)(response.status),
+          s"expected 404/405, got ${response.status}"
+        )
+      }
+      assertEquals(after.map(_.status), Some(PaymentStatus.Pending))
+    }
+  }
+
   test("GET /payments/{id} returns 400 for a malformed (non-UUID) id") {
     for {
       store <- PaymentStore.inMemory[IO]
@@ -222,200 +247,6 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       routes = PaymentRoutes.routes[IO](store, testLogger)
       response <- routes.orNotFound.run(
         Request[IO](Method.GET, uri"/payments" / unknownPaymentId)
-      )
-      logged <- testLogger.logged
-    } yield {
-      assertEquals(response.status, Status.NotFound)
-      val warns = logged.collect { case m: WARN => m }
-      assert(
-        warns.exists(m =>
-          m.message.toLowerCase.contains("not found") &&
-            m.ctx.get("payment_id").contains(unknownPaymentId)
-        ),
-        s"expected a 'not found' WARN line with id context, got: $warns"
-      )
-    }
-  }
-
-  test("PATCH /payments/{id} returns 200 with the updated entity") {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      postResponse <- routes.orNotFound.run(
-        Request[IO](Method.POST, uri"/payments").withEntity(
-          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-        )
-      )
-      created <- postResponse.as[PaymentResponse]
-      patchResponse <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("pending"))
-      )
-      updated <- patchResponse.as[PaymentResponse]
-    } yield {
-      assertEquals(patchResponse.status, Status.Ok)
-      assertEquals(updated.id, created.id)
-    }
-  }
-
-  test(
-    "PATCH /payments/{id} accepts \"captured\" and \"failed\" statuses"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      postResponse <- routes.orNotFound.run(
-        Request[IO](Method.POST, uri"/payments").withEntity(
-          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-        )
-      )
-      created <- postResponse.as[PaymentResponse]
-      capturedResponse <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("captured"))
-      )
-      captured <- capturedResponse.as[PaymentResponse]
-      failedResponse <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("failed"))
-      )
-      failed <- failedResponse.as[PaymentResponse]
-    } yield {
-      assertEquals(capturedResponse.status, Status.Ok)
-      assertEquals(captured.status, "captured")
-      assertEquals(failedResponse.status, Status.Ok)
-      assertEquals(failed.status, "failed")
-    }
-  }
-
-  test(
-    "PATCH /payments/{id} returns 400 with a JSON error body for an invalid status, and persists nothing"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      postResponse <- routes.orNotFound.run(
-        Request[IO](Method.POST, uri"/payments").withEntity(
-          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-        )
-      )
-      created <- postResponse.as[PaymentResponse]
-      patchResponse <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("bogus"))
-      )
-      body <- patchResponse.as[io.circe.Json]
-      getResponse <- routes.orNotFound.run(
-        Request[IO](Method.GET, uri"/payments" / created.id)
-      )
-      unchanged <- getResponse.as[PaymentResponse]
-    } yield {
-      assertEquals(patchResponse.status, Status.BadRequest)
-      assert(
-        body.asObject.exists(_.contains("error")),
-        s"expected a JSON error body, got: $body"
-      )
-      assertEquals(unchanged.status, "pending")
-    }
-  }
-
-  test(
-    "PATCH /payments/{id} logs a WARN for an invalid status"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      testLogger = StructuredTestingLogger.impl[IO]()
-      routes = PaymentRoutes.routes[IO](store, testLogger)
-      postResponse <- routes.orNotFound.run(
-        Request[IO](Method.POST, uri"/payments").withEntity(
-          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-        )
-      )
-      created <- postResponse.as[PaymentResponse]
-      _ <- testLogger.logged // drain POST's own log lines before the PATCH
-      patchResponse <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("bogus"))
-      )
-      logged <- testLogger.logged
-    } yield {
-      assertEquals(patchResponse.status, Status.BadRequest)
-      val warns = logged.collect { case m: WARN => m }
-      assert(
-        warns.exists(m => m.message.toLowerCase.contains("invalid status")),
-        s"expected an 'invalid status' WARN line, got: $warns"
-      )
-    }
-  }
-
-  test(
-    "PATCH /payments/{id} returns 404 with a JSON error body for an unknown id"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      response <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / unknownPaymentId)
-          .withEntity(UpdatePaymentRequest("pending"))
-      )
-      body <- response.as[io.circe.Json]
-    } yield {
-      assertEquals(response.status, Status.NotFound)
-      assert(
-        body.asObject.exists(_.contains("error")),
-        s"expected a JSON error body, got: $body"
-      )
-    }
-  }
-
-  test(
-    "PATCH /payments/{id} logs a received-request line and a completed line for a found entity"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      testLogger = StructuredTestingLogger.impl[IO]()
-      routes = PaymentRoutes.routes[IO](store, testLogger)
-      postResponse <- routes.orNotFound.run(
-        Request[IO](Method.POST, uri"/payments").withEntity(
-          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-        )
-      )
-      created <- postResponse.as[PaymentResponse]
-      _ <- testLogger.logged // drain POST's own log lines before the PATCH
-      patchResponse <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("pending"))
-      )
-      logged <- testLogger.logged
-    } yield {
-      assertEquals(patchResponse.status, Status.Ok)
-      val infos = logged.collect { case m: INFO => m }
-      assert(
-        infos.exists(m =>
-          m.message.toLowerCase.contains("received") &&
-            m.ctx.get("method").contains("PATCH") &&
-            m.ctx.get("payment_id").contains(created.id)
-        ),
-        s"expected a received-request INFO line with method/id context, got: $infos"
-      )
-      assert(
-        infos.exists(m =>
-          m.message.toLowerCase.contains("completed") &&
-            m.ctx.get("payment_id").contains(created.id)
-        ),
-        s"expected a completed INFO line with id context, got: $infos"
-      )
-    }
-  }
-
-  test("PATCH /payments/{id} logs a WARN for an unknown id") {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      testLogger = StructuredTestingLogger.impl[IO]()
-      routes = PaymentRoutes.routes[IO](store, testLogger)
-      response <- routes.orNotFound.run(
-        Request[IO](Method.PATCH, uri"/payments" / unknownPaymentId)
-          .withEntity(UpdatePaymentRequest("pending"))
       )
       logged <- testLogger.logged
     } yield {
@@ -532,78 +363,6 @@ class PaymentRoutesSuite extends CatsEffectSuite {
         ),
         s"expected a 'not found' WARN line with id context, got: $warns"
       )
-    }
-  }
-
-  test("PUT /payments/{id} returns 200 with the replaced entity") {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      postResponse <- routes.orNotFound.run(
-        Request[IO](Method.POST, uri"/payments").withEntity(
-          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-        )
-      )
-      created <- postResponse.as[PaymentResponse]
-      putResponse <- routes.orNotFound.run(
-        Request[IO](Method.PUT, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("pending"))
-      )
-      replaced <- putResponse.as[PaymentResponse]
-    } yield {
-      assertEquals(putResponse.status, Status.Ok)
-      assertEquals(replaced.id, created.id)
-    }
-  }
-
-  test(
-    "PUT /payments/{id} returns 404 with a JSON error body for an unknown id"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      response <- routes.orNotFound.run(
-        Request[IO](Method.PUT, uri"/payments" / unknownPaymentId)
-          .withEntity(UpdatePaymentRequest("pending"))
-      )
-      body <- response.as[io.circe.Json]
-    } yield {
-      assertEquals(response.status, Status.NotFound)
-      assert(
-        body.asObject.exists(_.contains("error")),
-        s"expected a JSON error body, got: $body"
-      )
-    }
-  }
-
-  test(
-    "PUT /payments/{id} returns 400 with a JSON error body for an invalid status, and persists nothing"
-  ) {
-    for {
-      store <- PaymentStore.inMemory[IO]
-      routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      postResponse <- routes.orNotFound.run(
-        Request[IO](Method.POST, uri"/payments").withEntity(
-          CreatePaymentRequest("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
-        )
-      )
-      created <- postResponse.as[PaymentResponse]
-      putResponse <- routes.orNotFound.run(
-        Request[IO](Method.PUT, uri"/payments" / created.id)
-          .withEntity(UpdatePaymentRequest("bogus"))
-      )
-      body <- putResponse.as[io.circe.Json]
-      getResponse <- routes.orNotFound.run(
-        Request[IO](Method.GET, uri"/payments" / created.id)
-      )
-      unchanged <- getResponse.as[PaymentResponse]
-    } yield {
-      assertEquals(putResponse.status, Status.BadRequest)
-      assert(
-        body.asObject.exists(_.contains("error")),
-        s"expected a JSON error body, got: $body"
-      )
-      assertEquals(unchanged.status, "pending")
     }
   }
 

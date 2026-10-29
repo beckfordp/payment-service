@@ -5,7 +5,7 @@ This file tracks all major tracks for the project.
 - [x] **Track: Transactional outbox for payment-service (TD-3.4, ADR 0008)**
   *Link: [./tracks/outbox_20261012/](./tracks/outbox_20261012/)*
 
-- [ ] **Track: Payment-service review fixes (4 High/3 Medium/4 Low, 2026-10-29 review)**
+- [~] **Track: Payment-service review fixes (4 High/3 Medium/4 Low, 2026-10-29 review)**
   *Link: [./tracks/payment-review-fixes_20261029/](./tracks/payment-review-fixes_20261029/)*
 
 ---

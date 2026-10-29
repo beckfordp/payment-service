@@ -111,8 +111,8 @@ object FulfilmentEventConsumer {
                   )
                 case Some(authId) =>
                   gateway.void(authId) *>
-                    store.update(payment.id, PaymentStatus.Voided).flatMap {
-                      case Some(voided) =>
+                    store.recordVoid(event.orderId).flatMap {
+                      case Some(_) =>
                         logger.info(
                           Map("order_id" -> event.orderId)
                         )("Authorization voided")

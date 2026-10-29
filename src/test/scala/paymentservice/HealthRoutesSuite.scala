@@ -13,10 +13,7 @@ class HealthRoutesSuite extends CatsEffectSuite {
       def create(orderId: String, amountCents: Int): IO[Payment] =
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
-      def update(
-          id: PaymentId,
-          status: PaymentStatus
-      ): IO[Option[Payment]] = IO.pure(None)
+      def recordVoid(orderId: String): IO[Option[Payment]] = IO.pure(None)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
       def findByOrderId(orderId: String): IO[Option[Payment]] =
@@ -46,10 +43,7 @@ class HealthRoutesSuite extends CatsEffectSuite {
       def create(orderId: String, amountCents: Int): IO[Payment] =
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
-      def update(
-          id: PaymentId,
-          status: PaymentStatus
-      ): IO[Option[Payment]] = IO.pure(None)
+      def recordVoid(orderId: String): IO[Option[Payment]] = IO.pure(None)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)
       def findByOrderId(orderId: String): IO[Option[Payment]] =

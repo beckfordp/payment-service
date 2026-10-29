@@ -36,7 +36,6 @@ final case class Payment(
 trait PaymentStore[F[_]] {
   def create(orderId: String, amountCents: Int): F[Payment]
   def get(id: PaymentId): F[Option[Payment]]
-  def update(id: PaymentId, status: PaymentStatus): F[Option[Payment]]
   def delete(id: PaymentId): F[Boolean]
   def ping: F[Boolean]
 
@@ -82,6 +81,12 @@ trait PaymentStore[F[_]] {
     * semantics as `recordCapture`.
     */
   def recordCaptureFailure(orderId: String, reason: String): F[Option[Payment]]
+
+  /** Atomically transitions an `Authorized` payment to `Voided` (US-18.2). A
+    * void publishes nothing, so no outbox row. Same `None` semantics as
+    * `recordCapture`.
+    */
+  def recordVoid(orderId: String): F[Option[Payment]]
 }
 
 object PaymentStore {
@@ -193,26 +198,6 @@ object PaymentStore {
 
         def get(id: PaymentId): F[Option[Payment]] = ref.get.map(_.get(id))
 
-        def update(
-            id: PaymentId,
-            status: PaymentStatus
-        ): F[Option[Payment]] =
-          for {
-            now <- Sync[F].realTimeInstant
-            updated <- ref.modify { entities =>
-              entities.get(id) match {
-                case None           => (entities, None)
-                case Some(existing) =>
-                  val next =
-                    existing.copy(
-                      status = status,
-                      updatedAt = now
-                    )
-                  (entities + (id -> next), Some(next))
-              }
-            }
-          } yield updated
-
         def delete(id: PaymentId): F[Boolean] =
           ref.modify { entities =>
             if (entities.contains(id)) (entities - id, true)
@@ -269,12 +254,20 @@ object PaymentStore {
               ).map(Some(_))
           }
 
+        /** Same contract as the Postgres conditional update: only a payment
+          * still in `PaymentStatus.Authorized` moves, and only to a target
+          * `PaymentStatus.transition` allows.
+          */
         private def transitionFromAuthorized(
             orderId: String,
             status: PaymentStatus,
-            reason: Option[String]
+            reason: Option[String],
+            envelope: Option[Payment => F[EventEnvelope]]
         ): F[Option[Payment]] =
           for {
+            _ <- Sync[F].fromEither(
+              PaymentStatus.transition(PaymentStatus.Authorized, status)
+            )
             now <- Sync[F].realTimeInstant
             transitioned <- ref.modify { entities =>
               entities.values.find(_.orderId == orderId) match {
@@ -290,28 +283,36 @@ object PaymentStore {
               }
             }
             result <- transitioned.traverse { payment =>
-              val envelope =
-                if (status == PaymentStatus.Captured)
-                  capturedEnvelope[F](payment)
-                else
-                  captureFailedEnvelope[F](
-                    payment,
-                    reason.getOrElse("capture_failed")
-                  )
-              envelope.flatMap(env =>
-                outboxRef.update(_ :+ (orderId -> env)).as(payment)
-              )
+              envelope
+                .traverse_(
+                  _(payment)
+                    .flatMap(env => outboxRef.update(_ :+ (orderId -> env)))
+                )
+                .as(payment)
             }
           } yield result
 
         def recordCapture(orderId: String): F[Option[Payment]] =
-          transitionFromAuthorized(orderId, PaymentStatus.Captured, None)
+          transitionFromAuthorized(
+            orderId,
+            PaymentStatus.Captured,
+            None,
+            Some(capturedEnvelope[F])
+          )
 
         def recordCaptureFailure(
             orderId: String,
             reason: String
         ): F[Option[Payment]] =
-          transitionFromAuthorized(orderId, PaymentStatus.Failed, Some(reason))
+          transitionFromAuthorized(
+            orderId,
+            PaymentStatus.Failed,
+            Some(reason),
+            Some(captureFailedEnvelope[F](_, reason))
+          )
+
+        def recordVoid(orderId: String): F[Option[Payment]] =
+          transitionFromAuthorized(orderId, PaymentStatus.Voided, None, None)
       }
       (store, outboxRef)
     }
@@ -440,31 +441,24 @@ object PaymentStore {
       WHERE order_id = $text
     """.query(paymentWithIdRow)
 
-  /** Conditional `authorized -> captured|failed` transition. The `WHERE status
-    * = 'authorized'` guard is the idempotency check: a duplicate
-    * `DispatchConfirmed` (or an unknown order) updates nothing and returns no
-    * row, so no outbox event is written.
+  /** Conditional `expected -> status` transition. The `WHERE status = expected`
+    * guard is the idempotency check: a duplicate `DispatchConfirmed` (or an
+    * unknown order) updates nothing and returns no row, so no outbox event is
+    * written.
     */
-  private val capturePayment: skunk.Query[
-    (PaymentStatus, Option[String], String),
+  private val transitionPayment: skunk.Query[
+    (PaymentStatus, Option[String], String, PaymentStatus),
     (UUID, PaymentRow)
   ] =
     sql"""
       UPDATE "payment"
-      SET status = $paymentStatus, decline_reason = ${text.opt}, updated_at = now()
-      WHERE order_id = $text AND status = 'authorized'
+      SET status = $paymentStatus,
+          decline_reason = COALESCE(${text.opt}, decline_reason),
+          updated_at = now()
+      WHERE order_id = $text AND status = $paymentStatus
       RETURNING id, order_id, amount_cents, status, created_at, updated_at,
                 payment_method_id, auth_id, expires_at, decline_reason
     """.query(paymentWithIdRow)
-
-  private val updatePayment: skunk.Query[(PaymentStatus, UUID), PaymentRow] =
-    sql"""
-      UPDATE "payment"
-      SET status = $paymentStatus, updated_at = now()
-      WHERE id = $uuid
-      RETURNING order_id, amount_cents, status, created_at, updated_at,
-                payment_method_id, auth_id, expires_at, decline_reason
-    """.query(paymentRow)
 
   private val deletePayment: skunk.Query[UUID, UUID] =
     sql"""
@@ -600,18 +594,6 @@ object PaymentStore {
                   }
                 }.map(_.map(toPayment(id, _)))
 
-              def update(
-                  id: PaymentId,
-                  status: PaymentStatus
-              ): F[Option[Payment]] =
-                timed("update") {
-                  pool.use { session =>
-                    session
-                      .prepare(updatePayment)
-                      .flatMap(_.option((status, PaymentId.uuid(id))))
-                  }
-                }.map(_.map(toPayment(id, _)))
-
               def delete(id: PaymentId): F[Boolean] =
                 timed("delete") {
                   pool.use { session =>
@@ -679,34 +661,44 @@ object PaymentStore {
                   orderId: String,
                   status: PaymentStatus,
                   reason: Option[String],
-                  envelope: Payment => F[EventEnvelope]
+                  envelope: Option[Payment => F[EventEnvelope]]
               ): F[Option[Payment]] =
-                timed("update") {
+                Sync[F].fromEither(
+                  PaymentStatus.transition(PaymentStatus.Authorized, status)
+                ) *> timed("update") {
                   pool.use { session =>
                     session.transaction.use { _ =>
                       session
-                        .prepare(capturePayment)
-                        .flatMap(_.option((status, reason, orderId)))
+                        .prepare(transitionPayment)
+                        .flatMap(
+                          _.option(
+                            (status, reason, orderId, PaymentStatus.Authorized)
+                          )
+                        )
                         .flatMap {
                           case None            => Sync[F].pure(None)
                           case Some((id, row)) =>
                             val payment = toPayment(PaymentId.fromUuid(id), row)
-                            for {
-                              event <- envelope(payment)
-                              outboxId <- Sync[F].delay(UUID.randomUUID())
-                              _ <- session
-                                .prepare(insertOutboxEvent)
-                                .flatMap(
-                                  _.execute(
-                                    (
-                                      outboxId,
-                                      orderId,
-                                      event,
-                                      event.correlationId
+                            envelope
+                              .traverse_ { build =>
+                                for {
+                                  event <- build(payment)
+                                  outboxId <- Sync[F].delay(UUID.randomUUID())
+                                  _ <- session
+                                    .prepare(insertOutboxEvent)
+                                    .flatMap(
+                                      _.execute(
+                                        (
+                                          outboxId,
+                                          orderId,
+                                          event,
+                                          event.correlationId
+                                        )
+                                      )
                                     )
-                                  )
-                                )
-                            } yield Some(payment)
+                                } yield ()
+                              }
+                              .as(Some(payment))
                         }
                     }
                   }
@@ -717,7 +709,7 @@ object PaymentStore {
                   orderId,
                   PaymentStatus.Captured,
                   None,
-                  capturedEnvelope[F]
+                  Some(capturedEnvelope[F])
                 )
 
               def recordCaptureFailure(
@@ -728,7 +720,15 @@ object PaymentStore {
                   orderId,
                   PaymentStatus.Failed,
                   Some(reason),
-                  payment => captureFailedEnvelope[F](payment, reason)
+                  Some(captureFailedEnvelope[F](_, reason))
+                )
+
+              def recordVoid(orderId: String): F[Option[Payment]] =
+                transitionFromAuthorized(
+                  orderId,
+                  PaymentStatus.Voided,
+                  None,
+                  None
                 )
             }
           }

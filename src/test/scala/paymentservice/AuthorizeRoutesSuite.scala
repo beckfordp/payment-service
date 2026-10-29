@@ -127,7 +127,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       spying = new PaymentStore[IO] {
         def create(o: String, a: Int) = payments.create(o, a)
         def get(id: PaymentId) = payments.get(id)
-        def update(id: PaymentId, s: PaymentStatus) = payments.update(id, s)
+        def recordVoid(o: String) = payments.recordVoid(o)
         def delete(id: PaymentId) = payments.delete(id)
         def ping = payments.ping
         def findByOrderId(o: String) = payments.findByOrderId(o)
@@ -236,7 +236,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       failingPayments = new PaymentStore[IO] {
         def create(o: String, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
-        def update(id: PaymentId, s: PaymentStatus) = f.payments.update(id, s)
+        def recordVoid(o: String) = f.payments.recordVoid(o)
         def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: String) = f.payments.findByOrderId(o)
@@ -432,7 +432,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       racingStore = new PaymentStore[IO] {
         def create(o: String, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
-        def update(id: PaymentId, s: PaymentStatus) = f.payments.update(id, s)
+        def recordVoid(o: String) = f.payments.recordVoid(o)
         def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: String) =
@@ -484,7 +484,7 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       racingStore = new PaymentStore[IO] {
         def create(o: String, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
-        def update(id: PaymentId, s: PaymentStatus) = f.payments.update(id, s)
+        def recordVoid(o: String) = f.payments.recordVoid(o)
         def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: String) = IO.pure(None)

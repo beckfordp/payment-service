@@ -92,45 +92,6 @@ class PaymentStorePostgresSuite
     }
   }
 
-  test("update returns the updated entity and returns it") {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          for {
-            created <- store.create(
-              "order-update",
-              4999
-            )
-            updated <- store.update(created.id, PaymentStatus.Pending)
-          } yield {
-            assertEquals(updated.map(_.id), Some(created.id))
-            assert(
-              updated.exists(!_.updatedAt.isBefore(created.updatedAt)),
-              s"expected updatedAt not to move backwards, got: $updated"
-            )
-          }
-        }
-    }
-  }
-
-  test("update returns None for an unknown id") {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          store
-            .update(
-              PaymentId.fromUuid(UUID.randomUUID()),
-              PaymentStatus.Pending
-            )
-            .map(assertEquals(_, None))
-        }
-    }
-  }
-
   /** `TestContainerForAll` shares one container across every test in this
     * suite, and every test here reuses the same hardcoded `orderId` — so
     * filtering by `paymentId` (embedded in each row's own payload, unique per
@@ -160,81 +121,6 @@ class PaymentStorePostgresSuite
         .toList
         .filter(_ == orderId)
     } finally conn.close()
-  }
-
-  test(
-    "update to Captured writes no outbox row (only recordCapture emits PaymentCaptured)"
-  ) {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          for {
-            created <- store.create(
-              "order-captured-outbox",
-              4999
-            )
-            updated <- store.update(created.id, PaymentStatus.Captured)
-          } yield {
-            assertEquals(updated.map(_.status), Some(PaymentStatus.Captured))
-            assertEquals(
-              outboxRowsForOrder(
-                postgres,
-                "order-captured-outbox"
-              ),
-              Nil
-            )
-          }
-        }
-    }
-  }
-
-  test(
-    "update to a non-Captured status writes no outbox row"
-  ) {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          for {
-            created <- store.create(
-              "order-pending-outbox",
-              4999
-            )
-            _ <- store.update(created.id, PaymentStatus.Pending)
-          } yield assertEquals(
-            outboxRowsForOrder(
-              postgres,
-              "order-pending-outbox"
-            ),
-            Nil
-          )
-        }
-    }
-  }
-
-  test(
-    "update on an unknown id writes no outbox row (atomicity: no state change, no event)"
-  ) {
-    withContainers { postgres =>
-      val config = configFor(postgres)
-      Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
-        .use { store =>
-          val unknownId = PaymentId.fromUuid(UUID.randomUUID())
-          store
-            .update(unknownId, PaymentStatus.Captured)
-            .map { result =>
-              assertEquals(result, None)
-              assertEquals(
-                outboxRowsForOrder(postgres, PaymentId.render(unknownId)),
-                Nil
-              )
-            }
-        }
-    }
   }
 
   test(
@@ -385,7 +271,7 @@ class PaymentStorePostgresSuite
   }
 
   test(
-    "full CRUD lifecycle: create -> read -> patch -> delete -> read-404, plus a readiness check"
+    "full CRUD lifecycle: create -> read -> delete -> read-404, plus a readiness check"
   ) {
     withContainers { postgres =>
       val config = configFor(postgres)
@@ -399,20 +285,12 @@ class PaymentStorePostgresSuite
               4999
             )
             read1 <- store.get(created.id)
-            updated <- store.update(created.id, PaymentStatus.Pending)
-            read2 <- store.get(created.id)
             deleted <- store.delete(created.id)
             read3 <- store.get(created.id)
           } yield {
             assert(ready, "expected the database to be ready")
             assertEquals(read1, Some(created))
-            assertEquals(
-              updated.map(_.orderId),
-              Some("order-crud")
-            )
-            assertEquals(updated.map(_.amountCents), Some(4999))
-            assertEquals(updated.map(_.status), Some(PaymentStatus.Pending))
-            assertEquals(read2, updated)
+            assertEquals(created.status, PaymentStatus.Pending)
             assert(deleted, "expected delete to report the entity existed")
             assertEquals(read3, None)
           }
@@ -689,6 +567,55 @@ class PaymentStorePostgresSuite
           )
         }
       }
+    }
+  }
+
+  test(
+    "recordVoid marks an Authorized payment Voided and writes no outbox row"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          authorized <- store
+            .recordAuthorization(orderId, 4999, method.id, authorization)
+            .map(_.getOrElse(fail("expected the authorization")))
+          voided <- store.recordVoid(orderId)
+          again <- store.recordVoid(orderId)
+          captured <- store.recordCapture(orderId)
+        } yield {
+          assertEquals(voided.map(_.id), Some(authorized.id))
+          assertEquals(voided.map(_.status), Some(PaymentStatus.Voided))
+          assertEquals(again, None)
+          assertEquals(captured, None)
+          assertEquals(
+            query(
+              postgres,
+              s"select payload->>'eventType' from outbox_events where aggregate_id = '$orderId'"
+            ),
+            List("PaymentAuthorized")
+          )
+        }
+      }
+    }
+  }
+
+  test("recordVoid returns None for a non-authorized payment, unchanged") {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      val config = configFor(postgres)
+      Migrations.run[IO](config) *> PaymentStore
+        .postgres[IO](config, Meter.noop[IO])
+        .use { store =>
+          for {
+            created <- store.create(orderId, 4999)
+            result <- store.recordVoid(orderId)
+            after <- store.get(created.id)
+          } yield {
+            assertEquals(result, None)
+            assertEquals(after.map(_.status), Some(PaymentStatus.Pending))
+          }
+        }
     }
   }
 

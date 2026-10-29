@@ -36,10 +36,6 @@ object AppRoutes {
         PaymentRoutes.serverEndpoint[F](store, telemetry.logger),
         PaymentRoutes.getPaymentServerEndpoint[F](store, telemetry.logger),
         PaymentRoutes
-          .updatePaymentServerEndpoint[F](store, telemetry.logger),
-        PaymentRoutes
-          .replacePaymentServerEndpoint[F](store, telemetry.logger),
-        PaymentRoutes
           .deletePaymentServerEndpoint[F](store, telemetry.logger),
         PaymentMethodRoutes
           .createMethodServerEndpoint[F](methods, telemetry.logger),

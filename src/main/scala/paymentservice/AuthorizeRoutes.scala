@@ -182,10 +182,11 @@ object AuthorizeRoutes {
                     AuthorizeError.Internal("Stored decline has no reason")
                   )
               }
-            case other =>
+            case status @ (PaymentStatus.Pending | PaymentStatus.Captured |
+                PaymentStatus.Voided) =>
               Left(
                 AuthorizeError.AlreadyProcessed(
-                  s"Order already has a payment in status ${other.asString}"
+                  s"Order already has a payment in status ${status.asString}"
                 )
               )
           }

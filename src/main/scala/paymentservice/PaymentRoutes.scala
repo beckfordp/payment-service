@@ -21,12 +21,6 @@ object CreatePaymentRequest {
   implicit val codec: Codec[CreatePaymentRequest] = deriveCodec
 }
 
-final case class UpdatePaymentRequest(status: String)
-
-object UpdatePaymentRequest {
-  implicit val codec: Codec[UpdatePaymentRequest] = deriveCodec
-}
-
 final case class PaymentResponse(
     id: String,
     orderId: String,
@@ -80,17 +74,8 @@ object PaymentRoutes {
         )
     )
 
-  private val invalidStatusVariant: EndpointOutput.OneOfVariant[InvalidStatus] =
-    oneOfVariant(
-      statusCode(StatusCode.BadRequest)
-        .and(jsonBody[ErrorResponse])
-        .map[InvalidStatus](e => InvalidStatus(e.error))(e =>
-          ErrorResponse(s"Invalid payment status: '${e.raw}'")
-        )
-    )
-
   private val paymentErrorOutput: EndpointOutput[PaymentError] =
-    oneOf[PaymentError](notFoundVariant, invalidStatusVariant)
+    oneOf[PaymentError](notFoundVariant)
 
   private val getPaymentEndpoint: PublicEndpoint[
     PaymentId,
@@ -100,30 +85,6 @@ object PaymentRoutes {
   ] =
     endpoint.get
       .in("payments" / path[PaymentId]("id"))
-      .out(jsonBody[PaymentResponse])
-      .errorOut(paymentErrorOutput)
-
-  private val updatePaymentEndpoint: PublicEndpoint[
-    (PaymentId, UpdatePaymentRequest),
-    PaymentError,
-    PaymentResponse,
-    Any
-  ] =
-    endpoint.patch
-      .in("payments" / path[PaymentId]("id"))
-      .in(jsonBody[UpdatePaymentRequest])
-      .out(jsonBody[PaymentResponse])
-      .errorOut(paymentErrorOutput)
-
-  private val replacePaymentEndpoint: PublicEndpoint[
-    (PaymentId, UpdatePaymentRequest),
-    PaymentError,
-    PaymentResponse,
-    Any
-  ] =
-    endpoint.put
-      .in("payments" / path[PaymentId]("id"))
-      .in(jsonBody[UpdatePaymentRequest])
       .out(jsonBody[PaymentResponse])
       .errorOut(paymentErrorOutput)
 
@@ -183,65 +144,6 @@ object PaymentRoutes {
       } yield result
     }
 
-  /** Shared handler for `PATCH` (partial update) and `PUT` (full replace) —
-    * both call `PaymentStore.update` with the same required update body; only
-    * the logged HTTP method differs.
-    */
-  private def updateLogic[F[_]: Monad](
-      store: PaymentStore[F],
-      logger: StructuredLogger[F],
-      httpMethod: String
-  )(
-      id: PaymentId,
-      req: UpdatePaymentRequest
-  ): F[Either[PaymentError, PaymentResponse]] = {
-    val renderedId = PaymentId.render(id)
-    for {
-      _ <- logger.info(
-        Map(
-          "method" -> httpMethod,
-          "path" -> s"/payments/$renderedId",
-          "payment_id" -> renderedId
-        )
-      )("Received request")
-      result <- PaymentStatus.fromString(req.status) match {
-        case Left(_) =>
-          logger
-            .warn(Map("payment_id" -> renderedId, "status" -> req.status))(
-              "Invalid status"
-            )
-            .as(Left(InvalidStatus(req.status)))
-        case Right(status) =>
-          store.update(id, status).flatMap {
-            case Some(entity) =>
-              logger
-                .info(Map("payment_id" -> renderedId))("Request completed")
-                .as(Right(PaymentResponse(entity)))
-            case None =>
-              logger
-                .warn(Map("payment_id" -> renderedId))("Payment not found")
-                .as(Left(PaymentNotFound))
-          }
-      }
-    } yield result
-  }
-
-  def updatePaymentServerEndpoint[F[_]: Monad](
-      store: PaymentStore[F],
-      logger: StructuredLogger[F]
-  ): ServerEndpoint[Any, F] =
-    updatePaymentEndpoint.serverLogic[F] { case (id, req) =>
-      updateLogic(store, logger, "PATCH")(id, req)
-    }
-
-  def replacePaymentServerEndpoint[F[_]: Monad](
-      store: PaymentStore[F],
-      logger: StructuredLogger[F]
-  ): ServerEndpoint[Any, F] =
-    replacePaymentEndpoint.serverLogic[F] { case (id, req) =>
-      updateLogic(store, logger, "PUT")(id, req)
-    }
-
   def deletePaymentServerEndpoint[F[_]: Monad](
       store: PaymentStore[F],
       logger: StructuredLogger[F]
@@ -277,8 +179,6 @@ object PaymentRoutes {
       List(
         serverEndpoint(store, logger),
         getPaymentServerEndpoint(store, logger),
-        updatePaymentServerEndpoint(store, logger),
-        replacePaymentServerEndpoint(store, logger),
         deletePaymentServerEndpoint(store, logger)
       )
     )
