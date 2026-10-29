@@ -19,12 +19,12 @@
 - [x] Implement DLQ-on-decode-failure; replay expiry check + `expires_at > now()` guard (plus consumer pre-check: expired → DLQ, no gateway call); `ON CONFLICT` + 409 errorOut + amount validation + in-memory uniqueness. Fixture expiries moved to 2099. — f129927
 - [x] Task: Conductor - User Manual Verification 'Phase 3 — DLQ, expiry, validation' (Protocol in workflow.md) — covered by suite (188 green)
 
-## Phase 4 — Low-severity cleanup (FR-8, FR-9, FR-10, FR-11)
+## Phase 4 — Low-severity cleanup (FR-8, FR-9, FR-10, FR-11) [checkpoint: 8a9ba3d]
 
-- [ ] Write failing tests: `OrderId` parse/roundtrip; remaining gaps — post-void DispatchConfirmed, replay captured/voided, MigrationsSuite inserts `voided`; confirm failure.
-- [ ] Implement typed `OrderId` (idempotency key, outbox, Kafka key) and typed `paymentMethodId` in `AuthorizePaymentRequest` (wire unchanged); narrow `DbTimer` to `Sync`, envelope builders to `Clock`+`UUIDGen`.
-- [ ] Docs: `PaymentEvents.scala`, `build.sbt:104`, `conductor/product.md` (Voided, PATCH/PUT removed), README, `verify-domain-foundations.sh`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 4 — Cleanup' (Protocol in workflow.md)
+- [x] Write failing tests: `OrderId` parse/roundtrip; remaining gaps — post-void DispatchConfirmed, replay captured/voided, MigrationsSuite inserts `voided`; confirm failure. — 8a9ba3d
+- [x] Implement typed `OrderId` (opaque non-blank String, not UUID - payment's CRUD/live scripts use free-form ids) and typed `paymentMethodId` in `AuthorizePaymentRequest` (wire unchanged; malformed id now tapir's default 400 body); narrow `DbTimer` to `MonadThrow`+`Clock` (narrower than planned `Sync`), envelope builders to `Monad`+`Clock`+`UUIDGen`. Tests use a test-only `TestConversions` for literals. — 8a9ba3d
+- [x] Docs: `PaymentEvents.scala`, `build.sbt:104`, `conductor/product.md` (Voided, PATCH/PUT removed), README, `verify-domain-foundations.sh`. — 8a9ba3d
+- [x] Task: Conductor - User Manual Verification 'Phase 4 — Cleanup' (Protocol in workflow.md) — covered by suite (194 green); live script run in Phase 5
 
 ## Phase 5 — Verification
 
