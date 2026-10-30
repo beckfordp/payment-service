@@ -5,6 +5,7 @@ import cats.effect.Clock
 import cats.syntax.all._
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.Meter
+import purerest.metrics.LatencyBuckets
 
 import scala.concurrent.duration.SECONDS
 
@@ -23,6 +24,7 @@ object DbTimer {
     meter
       .histogram[Double]("db.client.operation.duration")
       .withUnit("s")
+      .withExplicitBucketBoundaries(LatencyBuckets.seconds)
       .create
       .map { histogram =>
         new DbTimer[F] {
