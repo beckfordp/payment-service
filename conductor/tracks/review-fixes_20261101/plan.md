@@ -16,3 +16,6 @@
 - [x] Task: `uncancelable`+`poll` around authorize-then-record (M2) d1b90c2
 - [x] Task: Dead-letter null-value `fulfilment-events` records (L1) e5c6ab9
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Capability, cancellation, DLQ' (Protocol in workflow.md) — 2063abf
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions eec34fe
