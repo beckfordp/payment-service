@@ -5,6 +5,9 @@ This file tracks all major tracks for the project.
 - [x] **Track: Transactional outbox for payment-service (TD-3.4, ADR 0008)**
   *Link: [./tracks/outbox_20261012/](./tracks/outbox_20261012/)*
 
+- [~] **Track: TD-20.4 REST docs**
+  *Link: [./tracks/rest-docs_20261101/](./tracks/rest-docs_20261101/)*
+
 ---
 
 ---
@@ -17,6 +20,5 @@ priorities change. When ready to work on one, run `/conductor:newTrack <title>` 
 through the spec/plan questions and promote it into a real track above.
 
 - ADR: payment provider — real integration (Stripe etc.) vs. simulated
-- TD-20.4 — REST docs: endpoint/parameter/DTO descriptions and examples, coverage test (see `gluon/TECHNICAL_DEBT.md` TD-20.4)
 
 ---

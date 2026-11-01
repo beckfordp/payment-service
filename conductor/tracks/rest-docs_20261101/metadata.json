@@ -1,0 +1,8 @@
+{
+  "track_id": "rest-docs_20261101",
+  "type": "chore",
+  "status": "in_progress",
+  "created_at": "2026-11-01T20:15:00Z",
+  "updated_at": "2026-11-01T20:15:00Z",
+  "description": "TD-20.4 — REST docs: endpoint/parameter/DTO/error descriptions and examples, coverage test (gluon/TECHNICAL_DEBT.md TD-20.4)"
+}
