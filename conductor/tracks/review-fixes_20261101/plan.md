@@ -1,10 +1,10 @@
 # Plan — TD-16.1 payment-service review fixes
 
-## Phase 1: Pure core (M1, H2, H5)
+## Phase 1: Pure core (M1, H2, H5) [checkpoint: ffb87f9]
 - [x] Task: Move `PaymentStatus`/`transition` into `domain/` (M1) 2f03bb2
 - [x] Task: `LiveAuthorization` rule once in `domain/`; consumer, replay, in-memory store, SQL param use it (H2) 07bfe0e
 - [x] Task: `PaymentRules.validate` shared by `POST /payments` and `/payments/authorize` (H5) 88b18d3
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Pure core' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Pure core' (Protocol in workflow.md) — ffb87f9
 
 ## Phase 2: Typed errors and totality (H3, H4, H6)
 - [ ] Task: `PaymentStore.create` returns `Either[PaymentAlreadyExists, Payment]` (H3)
