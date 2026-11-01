@@ -170,6 +170,11 @@ class FulfilmentEventConsumerSuite
             dispatchConfirmed("order-unrelated").asJson
           )
         )
+        // Poll, don't sleep: a fixed wait flaked under load (TD-16.1 L2).
+        unknownWarned = logger.logged.map(_.exists {
+          case m: WARN => m.ctx.get("event_type").contains("PaymentAuthorized")
+          case _       => false
+        })
         _ <- runConsumer(
           config,
           store,
@@ -178,7 +183,12 @@ class FulfilmentEventConsumerSuite
           deadLetter,
           logger
         ).background
-          .use(_ => IO.sleep(3.seconds))
+          .use(_ =>
+            (IO.sleep(200.millis) *> unknownWarned)
+              .iterateUntil(identity)
+              .timeout(30.seconds)
+              .attempt
+          )
         logged <- logger.logged
       } yield {
         val warns = logged.collect { case m: WARN => m }

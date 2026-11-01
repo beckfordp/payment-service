@@ -5,7 +5,7 @@ import cats.effect.Async
 import cats.syntax.all._
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
-import paymentservice.domain.{OrderId, PaymentId}
+import paymentservice.domain.{PaymentRules, OrderId, PaymentId}
 import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
@@ -90,10 +90,7 @@ object PaymentRoutes {
       )
 
   private def validate(req: CreatePaymentRequest): Either[String, OrderId] =
-    for {
-      orderId <- OrderId.parse(req.orderId)
-      _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
-    } yield orderId
+    PaymentRules.validate(req.orderId, req.amountCents)
 
   private val notFoundVariant
       : EndpointOutput.OneOfVariant[PaymentNotFound.type] =

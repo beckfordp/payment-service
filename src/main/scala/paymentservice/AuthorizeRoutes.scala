@@ -1,6 +1,7 @@
 package paymentservice
 
 import paymentservice.domain.{
+  PaymentRules,
   LiveAuthorization,
   OrderId,
   PaymentId,
@@ -133,10 +134,7 @@ object AuthorizeRoutes {
       )
 
   private def validate(req: AuthorizePaymentRequest): Either[String, OrderId] =
-    for {
-      orderId <- OrderId.parse(req.orderId)
-      _ <- Either.cond(req.amountCents > 0, (), "amountCents must be positive")
-    } yield orderId
+    PaymentRules.validate(req.orderId, req.amountCents)
 
   def authorizeServerEndpoint[F[_]: MonadCancelThrow: Clock](
       payments: PaymentStore[F],

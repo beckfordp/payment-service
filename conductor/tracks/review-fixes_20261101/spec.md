@@ -18,7 +18,8 @@ Baseline: 195 tests green at `a3a40db`. No wire-contract change (REST or Kafka).
 | M1 | Medium | `PaymentStatus` + `transition` live outside `domain/` | Move to `paymentservice.domain` |
 | M2 | Medium | Cancellation window between `gateway.authorize` returning and `guaranteeCase` installing leaks the hold | `uncancelable` + `poll` around authorize-then-record |
 | L1 | Low | Null-value `fulfilment-events` records are logged and committed | Dead-letter them (DLQ value type `Option[String]`, null preserved) |
-| L2 | Low | (new) `customerId` on `POST /payments/methods` is an unparsed `String` (platform-wide a UUID) | Deferred: enforcing UUID rejects inputs accepted today (verify scripts send free-form ids); documented as UUID in TD-20.4 |
+| L2 | Low | (new) `FulfilmentEventConsumerSuite`'s unknown-event test waits a fixed 3s for the consumer; flaked twice under load | Poll the logger until the warn appears (30s cap) |
+| L3 | Low | (new) `customerId` on `POST /payments/methods` is an unparsed `String` (platform-wide a UUID) | Deferred: enforcing UUID rejects inputs accepted today (verify scripts send free-form ids); documented as UUID in TD-20.4 |
 
 ## Acceptance Criteria
 - Each fixed finding has a failing-first test (compile-level for H1) now green.
