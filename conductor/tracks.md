@@ -17,5 +17,6 @@ priorities change. When ready to work on one, run `/conductor:newTrack <title>` 
 through the spec/plan questions and promote it into a real track above.
 
 - ADR: payment provider — real integration (Stripe etc.) vs. simulated
+- TD-20.4 — REST docs: endpoint/parameter/DTO descriptions and examples, coverage test (see `gluon/TECHNICAL_DEBT.md` TD-20.4)
 
 ---
