@@ -79,11 +79,12 @@
 - pureconfig 0.17.10 — typed config from `application.conf`
 
 ## Shared platform library
-- `purerestlib` 0.1.0 (`io.github.beckfordp`) — tracing, structured logging,
+- `purerestlib` 0.7.3 (`io.github.beckfordp`) — tracing, structured logging,
   metrics, resilience (retry + circuit breaker), tapir-based docs. Consumed
   as a published GitHub Packages artifact, never vendored/`.dependsOn`.
-  ADR 0005 flags a possible future migration off GitHub Packages (JitPack or
-  Maven Central) — not yet adopted.
+  v0.7.3 adds `purerest.docs.Docs.undocumented`, the per-service REST docs
+  coverage check (gluon TD-20.1). ADR 0005 flags a possible future migration
+  off GitHub Packages (JitPack or Maven Central) — not yet adopted.
 
 ## Testing
 - munit 1.3.6 + munit-cats-effect 2.2.1
