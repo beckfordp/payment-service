@@ -1,5 +1,6 @@
 package paymentservice
 
+import cats.effect.IO
 import paymentservice.domain.{OrderId, PaymentMethodId}
 
 import scala.language.implicitConversions
@@ -15,4 +16,16 @@ object TestConversions {
     PaymentMethodId
       .parse(raw)
       .fold(e => throw new IllegalArgumentException(e), identity)
+
+  /** A create the test expects to succeed - fails the test on a conflict. */
+  extension (store: PaymentStore[IO])
+    def createOrFail(orderId: OrderId, amountCents: Int): IO[Payment] =
+      store
+        .create(orderId, amountCents)
+        .flatMap(
+          _.fold(
+            conflict => IO.raiseError(new AssertionError(conflict.message)),
+            IO.pure
+          )
+        )
 }

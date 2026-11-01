@@ -43,8 +43,11 @@ final case class Payment(
 
 trait PaymentStore[F[_]] {
 
-  /** Raises [[PaymentAlreadyExists]] when the order already has a payment. */
-  def create(orderId: OrderId, amountCents: Int): F[Payment]
+  /** `Left` when the order already has a payment; nothing is written. */
+  def create(
+      orderId: OrderId,
+      amountCents: Int
+  ): F[Either[PaymentAlreadyExists, Payment]]
   def get(id: PaymentId): F[Option[Payment]]
   def delete(id: PaymentId): F[Boolean]
   def ping: F[Boolean]
@@ -206,18 +209,20 @@ object PaymentStore {
         } yield entity
 
       val store = new PaymentStore[F] {
-        def create(orderId: OrderId, amountCents: Int): F[Payment] =
+        def create(
+            orderId: OrderId,
+            amountCents: Int
+        ): F[Either[PaymentAlreadyExists, Payment]] =
           for {
             id <- Sync[F].delay(PaymentId.fromUuid(java.util.UUID.randomUUID()))
             now <- Sync[F].realTimeInstant
             entity = Payment(id, orderId, amountCents, defaultStatus, now, now)
-            inserted <- ref.modify { entities =>
+            result <- ref.modify { entities =>
               if (entities.values.exists(_.orderId == orderId))
-                (entities, false)
-              else (entities + (id -> entity), true)
+                (entities, Left(PaymentAlreadyExists(orderId)))
+              else (entities + (id -> entity), Right(entity))
             }
-            _ <- Sync[F].raiseUnless(inserted)(PaymentAlreadyExists(orderId))
-          } yield entity
+          } yield result
 
         def get(id: PaymentId): F[Option[Payment]] = ref.get.map(_.get(id))
 
@@ -596,7 +601,10 @@ object PaymentStore {
               } yield row.map(toPayment(PaymentId.fromUuid(id), _))
 
             new PaymentStore[F] {
-              def create(orderId: OrderId, amountCents: Int): F[Payment] =
+              def create(
+                  orderId: OrderId,
+                  amountCents: Int
+              ): F[Either[PaymentAlreadyExists, Payment]] =
                 for {
                   id <- Sync[F].delay(UUID.randomUUID())
                   inserted <- timed("insert") {
@@ -608,21 +616,18 @@ object PaymentStore {
                         )
                     }
                   }
-                  timestamps <- Sync[F].fromOption(
-                    inserted,
-                    PaymentAlreadyExists(orderId)
-                  )
-                } yield {
-                  val (createdAt, updatedAt) = timestamps
-                  Payment(
-                    PaymentId.fromUuid(id),
-                    orderId,
-                    amountCents,
-                    defaultStatus,
-                    createdAt.toInstant,
-                    updatedAt.toInstant
-                  )
-                }
+                } yield inserted
+                  .toRight(PaymentAlreadyExists(orderId))
+                  .map { case (createdAt, updatedAt) =>
+                    Payment(
+                      PaymentId.fromUuid(id),
+                      orderId,
+                      amountCents,
+                      defaultStatus,
+                      createdAt.toInstant,
+                      updatedAt.toInstant
+                    )
+                  }
 
               def get(id: PaymentId): F[Option[Payment]] =
                 timed("select") {

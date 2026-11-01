@@ -133,7 +133,6 @@ object PaymentRoutes {
       ): F[Either[CreatePaymentError, PaymentResponse]] =
         store
           .create(orderId, req.amountCents)
-          .attemptNarrow[PaymentAlreadyExists]
           .flatMap {
             case Right(entity) =>
               logger
@@ -146,7 +145,7 @@ object PaymentRoutes {
                 .warn(Map("order_id" -> req.orderId))(
                   "Order already has a payment"
                 )
-                .as(Left(CreatePaymentError.Conflict(conflict.getMessage)))
+                .as(Left(CreatePaymentError.Conflict(conflict.message)))
           }
           .onError { case error =>
             logger.error(Map.empty, error)("Persisting the payment failed")

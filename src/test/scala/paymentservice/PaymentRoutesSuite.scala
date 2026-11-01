@@ -7,6 +7,7 @@ import paymentservice.domain.{
   PaymentStatus
 }
 import paymentservice.TestConversions.given
+import paymentservice.TestConversions.createOrFail
 import scala.language.implicitConversions
 import cats.effect.IO
 import cats.syntax.all._
@@ -29,7 +30,10 @@ class PaymentRoutesSuite extends CatsEffectSuite {
 
   private def failingStore(error: Throwable): PaymentStore[IO] =
     new PaymentStore[IO] {
-      def create(orderId: OrderId, amountCents: Int): IO[Payment] =
+      def create(
+          orderId: OrderId,
+          amountCents: Int
+      ): IO[Either[PaymentAlreadyExists, Payment]] =
         IO.raiseError(error)
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] =
@@ -173,7 +177,7 @@ class PaymentRoutesSuite extends CatsEffectSuite {
     for {
       store <- PaymentStore.inMemory[IO]
       routes = PaymentRoutes.routes[IO](store, NoOpLogger[IO])
-      created <- store.create("order-1", 4999)
+      created <- store.createOrFail("order-1", 4999)
       responses <- List(Method.PATCH, Method.PUT).traverse { method =>
         routes.orNotFound.run(
           Request[IO](method, uri"/payments" / PaymentId.render(created.id))

@@ -12,7 +12,10 @@ class HealthRoutesSuite extends CatsEffectSuite {
 
   private val readyStore: PaymentStore[IO] =
     new PaymentStore[IO] {
-      def create(orderId: OrderId, amountCents: Int): IO[Payment] =
+      def create(
+          orderId: OrderId,
+          amountCents: Int
+      ): IO[Either[PaymentAlreadyExists, Payment]] =
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)
@@ -42,7 +45,10 @@ class HealthRoutesSuite extends CatsEffectSuite {
 
   private val notReadyStore: PaymentStore[IO] =
     new PaymentStore[IO] {
-      def create(orderId: OrderId, amountCents: Int): IO[Payment] =
+      def create(
+          orderId: OrderId,
+          amountCents: Int
+      ): IO[Either[PaymentAlreadyExists, Payment]] =
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)

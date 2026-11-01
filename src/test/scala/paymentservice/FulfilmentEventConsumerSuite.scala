@@ -2,6 +2,7 @@ package paymentservice
 
 import paymentservice.domain.{OrderId, PaymentMethodId, PaymentStatus}
 import paymentservice.TestConversions.given
+import paymentservice.TestConversions.createOrFail
 import scala.language.implicitConversions
 import cats.effect.{IO, Ref}
 import com.dimafeng.testcontainers.KafkaContainer
@@ -251,7 +252,7 @@ class FulfilmentEventConsumerSuite
         store <- PaymentStore.inMemory[IO]
         methods <- PaymentMethodStore.inMemory[IO]
         s <- spy()
-        created <- store.create("order-pending", 1000)
+        created <- store.createOrFail("order-pending", 1000)
         event = DispatchFailedEvent(OrderId.render(created.orderId), "damaged")
         _ <-
           produce(
@@ -368,7 +369,7 @@ class FulfilmentEventConsumerSuite
         (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
         methods <- PaymentMethodStore.inMemory[IO]
         s <- spy()
-        created <- store.create("order-pending", 1000)
+        created <- store.createOrFail("order-pending", 1000)
         event = dispatchConfirmed(OrderId.render(created.orderId))
         _ <- produce(
           config,

@@ -7,6 +7,7 @@ import paymentservice.domain.{
   PaymentStatus
 }
 import paymentservice.TestConversions.given
+import paymentservice.TestConversions.createOrFail
 import scala.language.implicitConversions
 import cats.effect.IO
 import munit.CatsEffectSuite
@@ -24,14 +25,17 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("create returns a persisted entity with a generated id") {
     for {
       store <- PaymentStore.inMemory[IO]
-      entity <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+      entity <- store.createOrFail("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
     } yield assert(PaymentId.render(entity.id).nonEmpty)
   }
 
   test("get returns the persisted entity") {
     for {
       store <- PaymentStore.inMemory[IO]
-      created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+      created <- store.createOrFail(
+        "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        4999
+      )
       found <- store.get(created.id)
     } yield assertEquals(found, Some(created))
   }
@@ -46,8 +50,8 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("create produces distinct ids across calls") {
     for {
       store <- PaymentStore.inMemory[IO]
-      first <- store.create("order-a", 4999)
-      second <- store.create("order-b", 4999)
+      first <- store.createOrFail("order-a", 4999)
+      second <- store.createOrFail("order-b", 4999)
     } yield assertNotEquals(first.id, second.id)
   }
 
@@ -56,7 +60,10 @@ class PaymentStoreSuite extends CatsEffectSuite {
   ) {
     for {
       store <- PaymentStore.inMemory[IO]
-      created <- store.create("3fa85f64-5717-4562-b3fc-2c963f66afa6", 4999)
+      created <- store.createOrFail(
+        "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        4999
+      )
       deleted <- store.delete(created.id)
       found <- store.get(created.id)
     } yield {
@@ -270,7 +277,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("recordVoid returns None for a non-authorized payment, unchanged") {
     for {
       store <- PaymentStore.inMemory[IO]
-      created <- store.create("order-1", 4999)
+      created <- store.createOrFail("order-1", 4999)
       result <- store.recordVoid("order-1")
       after <- store.get(created.id)
     } yield {
@@ -291,7 +298,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("recordCapture returns None for a non-authorized payment") {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
-      _ <- store.create("order-1", 4999)
+      _ <- store.createOrFail("order-1", 4999)
       result <- store.recordCapture("order-1")
       events <- outbox.get
     } yield {
@@ -331,7 +338,7 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("recordCaptureFailure returns None for a non-authorized payment") {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
-      _ <- store.create("order-1", 4999)
+      _ <- store.createOrFail("order-1", 4999)
       result <- store.recordCaptureFailure("order-1", "capture_failed")
       events <- outbox.get
     } yield {
@@ -343,8 +350,8 @@ class PaymentStoreSuite extends CatsEffectSuite {
   test("create rejects a second payment for the same order") {
     for {
       store <- PaymentStore.inMemory[IO]
-      _ <- store.create("order-dup", 4999)
-      result <- store.create("order-dup", 4999).attempt
+      _ <- store.createOrFail("order-dup", 4999)
+      result <- store.create("order-dup", 4999)
     } yield assertEquals(result, Left(PaymentAlreadyExists("order-dup")))
   }
 

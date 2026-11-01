@@ -7,6 +7,7 @@ import paymentservice.domain.{
   PaymentStatus
 }
 import paymentservice.TestConversions.given
+import paymentservice.TestConversions.createOrFail
 import scala.language.implicitConversions
 import cats.effect.IO
 import cats.syntax.all._
@@ -47,7 +48,7 @@ class PaymentStorePostgresSuite
       Migrations.run[IO](config) *> PaymentStore
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
-          store.create("order-create", 4999).map { entity =>
+          store.createOrFail("order-create", 4999).map { entity =>
             assert(PaymentId.render(entity.id).nonEmpty)
           }
         }
@@ -62,8 +63,8 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            first <- store.create("order-1", 4999)
-            second <- store.create("order-2", 4999)
+            first <- store.createOrFail("order-1", 4999)
+            second <- store.createOrFail("order-2", 4999)
           } yield assertNotEquals(first.id, second.id)
         }
     }
@@ -76,7 +77,7 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            created <- store.create(
+            created <- store.createOrFail(
               "order-get",
               4999
             )
@@ -139,7 +140,7 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            created <- store.create(
+            created <- store.createOrFail(
               "order-delete",
               4999
             )
@@ -198,7 +199,7 @@ class PaymentStorePostgresSuite
           .postgres[IO](config, testMeter.meter)
           .use { store =>
             for {
-              created <- store.create(
+              created <- store.createOrFail(
                 "order-metrics",
                 4999
               )
@@ -293,7 +294,7 @@ class PaymentStorePostgresSuite
         .use { store =>
           for {
             ready <- store.ping
-            created <- store.create(
+            created <- store.createOrFail(
               "order-crud",
               4999
             )
@@ -621,7 +622,7 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            created <- store.create(orderId, 4999)
+            created <- store.createOrFail(orderId, 4999)
             result <- store.recordVoid(orderId)
             after <- store.get(created.id)
           } yield {
@@ -640,7 +641,7 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            _ <- store.create(orderId, 4999)
+            _ <- store.createOrFail(orderId, 4999)
             result <- store.recordCapture(orderId)
           } yield {
             assertEquals(result, None)
@@ -747,8 +748,8 @@ class PaymentStorePostgresSuite
         .postgres[IO](config, Meter.noop[IO])
         .use { store =>
           for {
-            _ <- store.create(orderId, 4999)
-            result <- store.create(orderId, 4999).attempt
+            _ <- store.createOrFail(orderId, 4999)
+            result <- store.create(orderId, 4999)
           } yield assertEquals(result, Left(PaymentAlreadyExists(orderId)))
         }
     }
