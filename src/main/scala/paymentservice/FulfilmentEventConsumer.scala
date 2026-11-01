@@ -91,11 +91,12 @@ object DispatchConfirmedEvent {
   *
   * Missing or non-authorized payments are logged and skipped; a gateway or
   * store failure is retried through the DLQ and leaves the payment authorized.
-  * A gateway call is idempotent by `authId`, so a retry after a failed store
-  * write is safe. A store write that matches no authorized row after the
-  * gateway call raises [[UnrecordedTransition]] rather than committing. A
-  * duplicate `DispatchConfirmed` finds the payment already `captured` and
-  * no-ops.
+  * A null-value record has nothing to decode: it is dead-lettered with its null
+  * value preserved. A gateway call is idempotent by `authId`, so a retry after
+  * a failed store write is safe. A store write that matches no authorized row
+  * after the gateway call raises [[UnrecordedTransition]] rather than
+  * committing. A duplicate `DispatchConfirmed` finds the payment already
+  * `captured` and no-ops.
   */
 object FulfilmentEventConsumer {
 

@@ -615,7 +615,9 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       ).start
       _ <- holdPlaced.get
       cancelling <- fiber.cancel.start
-      _ <- IO.sleep(200.millis)
+      // Give the cancel-request fiber time to set the flag (this is exactly
+      // the window the fix masks; without it the request is canceled here).
+      _ <- IO.sleep(1.second)
       _ <- release.complete(())
       _ <- cancelling.join
       released <- voided.get.iterateUntil(_.nonEmpty).timeout(2.seconds)
