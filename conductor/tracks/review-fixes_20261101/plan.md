@@ -1,7 +1,7 @@
 # Plan — TD-16.1 payment-service review fixes
 
 ## Phase 1: Pure core (M1, H2, H5)
-- [ ] Task: Move `PaymentStatus`/`transition` into `domain/` (M1)
+- [x] Task: Move `PaymentStatus`/`transition` into `domain/` (M1) 2f03bb2
 - [ ] Task: `LiveAuthorization` rule once in `domain/`; consumer, replay, in-memory store, SQL param use it (H2)
 - [ ] Task: `PaymentRules.validate` shared by `POST /payments` and `/payments/authorize` (H5)
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Pure core' (Protocol in workflow.md)
