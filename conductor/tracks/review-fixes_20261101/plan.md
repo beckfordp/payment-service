@@ -3,7 +3,7 @@
 ## Phase 1: Pure core (M1, H2, H5)
 - [x] Task: Move `PaymentStatus`/`transition` into `domain/` (M1) 2f03bb2
 - [x] Task: `LiveAuthorization` rule once in `domain/`; consumer, replay, in-memory store, SQL param use it (H2) 07bfe0e
-- [ ] Task: `PaymentRules.validate` shared by `POST /payments` and `/payments/authorize` (H5)
+- [x] Task: `PaymentRules.validate` shared by `POST /payments` and `/payments/authorize` (H5) 88b18d3
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Pure core' (Protocol in workflow.md)
 
 ## Phase 2: Typed errors and totality (H3, H4, H6)
