@@ -9,6 +9,8 @@ import org.http4s.implicits._
 import org.http4s.{Method, Request, Status}
 import org.typelevel.log4cats.noop.NoOpLogger
 import purerest.docs.Docs
+import sttp.tapir.EndpointOutput
+import sttp.tapir.server.ServerEndpoint
 
 class PaymentDocsSuite extends CatsEffectSuite {
 
@@ -88,5 +90,85 @@ class PaymentDocsSuite extends CatsEffectSuite {
       assert(clue(docsBody).contains("/payments/authorize"))
       assert(clue(docsBody).contains("'402'"))
     }
+  }
+
+  private val docsGateway = PaymentGatewayClient.simulated[IO](
+    SimulatedGatewayConfig(
+      GatewayOutcome.Approve,
+      Map.empty,
+      GatewayOutcome.Approve,
+      Map.empty,
+      scala.concurrent.duration.Duration(1, "day")
+    )
+  )
+
+  /** Every fixed status an output can produce (tapir's own traversal is
+    * internal).
+    */
+  private def statuses(output: EndpointOutput[?]): List[Int] =
+    output match {
+      case EndpointOutput.FixedStatusCode(code, _, _) => List(code.code)
+      case EndpointOutput.OneOf(variants, _)          =>
+        variants.flatMap(v => statuses(v.output))
+      case EndpointOutput.Pair(left, right, _, _) =>
+        statuses(left) ++ statuses(right)
+      case EndpointOutput.MappedPair(pair, _) => statuses(pair)
+      case _                                  => Nil
+    }
+
+  private def errorStatuses(endpoint: ServerEndpoint[Any, IO]): List[Int] =
+    statuses(endpoint.endpoint.errorOutput).sorted
+
+  /** Exactly the endpoints `AppRoutes` passes to `Docs.routes`. */
+  private def documentedEndpoints(
+      store: PaymentStore[IO],
+      methods: PaymentMethodStore[IO]
+  ): List[ServerEndpoint[Any, IO]] = {
+    val logger = NoOpLogger[IO]
+    List(
+      PaymentRoutes.serverEndpoint[IO](store, logger),
+      PaymentRoutes.getPaymentServerEndpoint[IO](store, logger),
+      PaymentRoutes.deletePaymentServerEndpoint[IO](store, logger),
+      PaymentMethodRoutes.createMethodServerEndpoint[IO](methods, logger),
+      AuthorizeRoutes.authorizeServerEndpoint[IO](
+        store,
+        methods,
+        docsGateway,
+        logger
+      ),
+      HealthRoutes.healthServerEndpoint[IO],
+      HealthRoutes.readyServerEndpoint[IO](store)
+    )
+  }
+
+  test("each endpoint documents only the errors it can return") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      methods <- PaymentMethodStore.inMemory[IO]
+    } yield {
+      val endpoints = documentedEndpoints(store, methods)
+      val expected = List(
+        List(400, 409), // POST /payments
+        List(404), // GET /payments/{id}
+        List(404), // DELETE /payments/{id}
+        List(400), // POST /payments/methods
+        List(400, 402, 404, 409, 500), // POST /payments/authorize
+        Nil, // GET /health
+        List(503) // GET /health/ready
+      )
+      assertEquals(endpoints.map(errorStatuses), expected)
+    }
+  }
+
+  test("every endpoint is documented") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      methods <- PaymentMethodStore.inMemory[IO]
+    } yield assertEquals(
+      Docs
+        .undocumented(documentedEndpoints(store, methods).map(_.endpoint))
+        .map(_.render),
+      Nil
+    )
   }
 }

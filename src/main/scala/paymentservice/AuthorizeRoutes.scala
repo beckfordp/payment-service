@@ -17,16 +17,25 @@ import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
 import sttp.tapir._
+import sttp.tapir.Schema.annotations.{description, encodedExample}
 import sttp.tapir.generic.auto._
 import sttp.tapir.json.circe._
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
 import java.time.Instant
+import java.util.UUID
 
+@description("An order to authorize, and the method to hold against.")
 final case class AuthorizePaymentRequest(
+    @description("Order id to authorize; non-blank.")
+    @encodedExample("3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f")
     orderId: String,
+    @description("Amount to hold, in cents; must be positive.")
+    @encodedExample(4999)
     amountCents: Int,
+    @description("Saved payment method (UUID) to authorize against.")
+    @encodedExample("5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b")
     paymentMethodId: PaymentMethodId
 )
 
@@ -34,13 +43,30 @@ object AuthorizePaymentRequest {
   implicit val codec: Codec[AuthorizePaymentRequest] = deriveCodec
 }
 
-final case class AuthorizePaymentResponse(authId: String, expiresAt: Instant)
+@description("The placed hold.")
+final case class AuthorizePaymentResponse(
+    @description("Provider authorization id (the hold reference).")
+    @encodedExample("auth_2f1c3b4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
+    authId: String,
+    @description("Hold expiry (UTC); after this a capture is refused.")
+    @encodedExample("2026-11-08T12:00:00Z")
+    expiresAt: Instant
+)
 
 object AuthorizePaymentResponse {
   implicit val codec: Codec[AuthorizePaymentResponse] = deriveCodec
 }
 
-final case class DeclinedResponse(error: String, reason: String)
+@description("The provider declined the authorization.")
+final case class DeclinedResponse(
+    @description("Human-readable outcome.")
+    @encodedExample("Payment declined")
+    error: String,
+    @description("Provider decline reason.") @encodedExample(
+      "insufficient_funds"
+    )
+    reason: String
+)
 
 object DeclinedResponse {
   implicit val codec: Codec[DeclinedResponse] = deriveCodec
@@ -63,11 +89,32 @@ object AuthorizeError {
   */
 object AuthorizeRoutes {
 
+  // REST docs convention (purerest README "Documenting endpoints"): every
+  // endpoint, parameter, DTO field and error is described; PaymentDocsSuite
+  // asserts Docs.undocumented finds no gaps.
+  private val tag = "payments"
+
+  private val exampleAuthorization = AuthorizePaymentResponse(
+    "auth_2f1c3b4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    Instant.parse("2026-11-08T12:00:00Z")
+  )
+
+  private def errorBody(
+      what: String,
+      example: ErrorResponse
+  ): EndpointIO.Body[String, ErrorResponse] =
+    jsonBody[ErrorResponse].description(what).example(example)
+
   private val invalidVariant
       : EndpointOutput.OneOfVariant[AuthorizeError.Invalid] =
     oneOfVariant(
       statusCode(StatusCode.BadRequest)
-        .and(jsonBody[ErrorResponse])
+        .and(
+          errorBody(
+            "`orderId` is blank or `amountCents` isn't positive.",
+            ErrorResponse("amountCents must be positive")
+          )
+        )
         .map[AuthorizeError.Invalid](e => AuthorizeError.Invalid(e.error))(e =>
           ErrorResponse(e.error)
         )
@@ -77,7 +124,12 @@ object AuthorizeRoutes {
       : EndpointOutput.OneOfVariant[AuthorizeError.MethodNotFound.type] =
     oneOfVariant(
       statusCode(StatusCode.NotFound)
-        .and(jsonBody[ErrorResponse])
+        .and(
+          errorBody(
+            "No payment method with this id.",
+            ErrorResponse("Payment method not found")
+          )
+        )
         .map[AuthorizeError.MethodNotFound.type](_ =>
           AuthorizeError.MethodNotFound
         )(_ => ErrorResponse("Payment method not found"))
@@ -87,7 +139,11 @@ object AuthorizeRoutes {
       : EndpointOutput.OneOfVariant[AuthorizeError.Declined] =
     oneOfVariant(
       statusCode(StatusCode.PaymentRequired)
-        .and(jsonBody[DeclinedResponse])
+        .and(
+          jsonBody[DeclinedResponse]
+            .description("The provider declined the hold.")
+            .example(DeclinedResponse("Payment declined", "insufficient_funds"))
+        )
         .map[AuthorizeError.Declined](d => AuthorizeError.Declined(d.reason))(
           d => DeclinedResponse("Payment declined", d.reason)
         )
@@ -97,7 +153,14 @@ object AuthorizeRoutes {
       : EndpointOutput.OneOfVariant[AuthorizeError.AlreadyProcessed] =
     oneOfVariant(
       statusCode(StatusCode.Conflict)
-        .and(jsonBody[ErrorResponse])
+        .and(
+          errorBody(
+            "The order already has a payment with a different amount or payment method, its stored authorization has expired, or it is `pending`, `captured` or `voided`.",
+            ErrorResponse(
+              "Order already has a payment with a different amount or payment method"
+            )
+          )
+        )
         .map[AuthorizeError.AlreadyProcessed](e =>
           AuthorizeError.AlreadyProcessed(e.error)
         )(e => ErrorResponse(e.error))
@@ -107,7 +170,12 @@ object AuthorizeRoutes {
       : EndpointOutput.OneOfVariant[AuthorizeError.Internal] =
     oneOfVariant(
       statusCode(StatusCode.InternalServerError)
-        .and(jsonBody[ErrorResponse])
+        .and(
+          errorBody(
+            "The stored payment is inconsistent (an authorization missing `authId`/`expiresAt`, or a decline with no reason), or the payment couldn't be recorded or read back.",
+            ErrorResponse("Stored authorization is incomplete")
+          )
+        )
         .map[AuthorizeError.Internal](e => AuthorizeError.Internal(e.error))(
           e => ErrorResponse(e.error)
         )
@@ -121,8 +189,18 @@ object AuthorizeRoutes {
   ] =
     endpoint.post
       .in("payments" / "authorize")
-      .in(jsonBody[AuthorizePaymentRequest])
-      .out(jsonBody[AuthorizePaymentResponse])
+      .in(
+        jsonBody[AuthorizePaymentRequest].example(
+          AuthorizePaymentRequest(
+            "3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f",
+            4999,
+            PaymentMethodId.fromUuid(
+              UUID.fromString("5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b")
+            )
+          )
+        )
+      )
+      .out(jsonBody[AuthorizePaymentResponse].example(exampleAuthorization))
       .errorOut(
         oneOf[AuthorizeError](
           invalidVariant,
@@ -132,6 +210,11 @@ object AuthorizeRoutes {
           internalVariant
         )
       )
+      .summary("Authorize a payment")
+      .description(
+        "Places a hold for an order and records it as `authorized`, publishing `PaymentAuthorized` via the outbox. A repeated identical request replays the stored authorization (same `authId`/`expiresAt`, no second hold); a different amount or payment method for the same order is `409`; a replayed decline is `402` with the original reason. Declines are synchronous and publish nothing."
+      )
+      .tag(tag)
 
   private def validate(req: AuthorizePaymentRequest): Either[String, OrderId] =
     PaymentRules.validate(req.orderId, req.amountCents)

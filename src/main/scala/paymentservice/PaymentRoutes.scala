@@ -10,23 +10,51 @@ import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
 import sttp.tapir._
+import sttp.tapir.Schema.annotations.{description, encodedExample}
 import sttp.tapir.generic.auto._
 import sttp.tapir.json.circe._
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
-final case class CreatePaymentRequest(orderId: String, amountCents: Int)
+import java.util.UUID
+
+@description("A new payment to record.")
+final case class CreatePaymentRequest(
+    @description(
+      "Order id this payment is for; non-blank, unique across payments."
+    )
+    @encodedExample("3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f")
+    orderId: String,
+    @description("Amount to charge, in cents; must be positive.")
+    @encodedExample(4999)
+    amountCents: Int
+)
 
 object CreatePaymentRequest {
   implicit val codec: Codec[CreatePaymentRequest] = deriveCodec
 }
 
+@description("A payment as stored.")
 final case class PaymentResponse(
+    @description("Payment id (UUID).")
+    @encodedExample("9b2f1c3d-4e5a-4b6c-8d7e-9f0a1b2c3d4e")
     id: String,
+    @description("Order id the payment is for.")
+    @encodedExample("3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f")
     orderId: String,
+    @description("Amount to charge, in cents.")
+    @encodedExample(4999)
     amountCents: Int,
+    @description(
+      "Lifecycle status: `pending`, `authorized`, `captured`, `failed` or `voided`."
+    )
+    @encodedExample("pending")
     status: String,
+    @description("Creation time (UTC).")
+    @encodedExample("2026-11-01T12:00:00Z")
     createdAt: java.time.Instant,
+    @description("Last status change (UTC).")
+    @encodedExample("2026-11-01T12:00:00Z")
     updatedAt: java.time.Instant
 )
 
@@ -44,7 +72,11 @@ object PaymentResponse {
     )
 }
 
-final case class ErrorResponse(error: String)
+@description("A failed request.")
+final case class ErrorResponse(
+    @description("Human-readable reason.") @encodedExample("Payment not found")
+    error: String
+)
 
 sealed trait CreatePaymentError
 
@@ -59,6 +91,35 @@ object ErrorResponse {
 
 object PaymentRoutes {
 
+  // REST docs convention (purerest README "Documenting endpoints"): every
+  // endpoint, parameter, DTO field and error is described; PaymentDocsSuite
+  // asserts Docs.undocumented finds no gaps.
+  private val tag = "payments"
+
+  private val examplePayment = PaymentResponse(
+    "9b2f1c3d-4e5a-4b6c-8d7e-9f0a1b2c3d4e",
+    "3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f",
+    4999,
+    "pending",
+    java.time.Instant.parse("2026-11-01T12:00:00Z"),
+    java.time.Instant.parse("2026-11-01T12:00:00Z")
+  )
+
+  private def errorBody(
+      what: String,
+      example: ErrorResponse
+  ): EndpointIO.Body[String, ErrorResponse] =
+    jsonBody[ErrorResponse].description(what).example(example)
+
+  private val idPath: EndpointInput.PathCapture[PaymentId] =
+    path[PaymentId]("id")
+      .description("Payment id (UUID).")
+      .example(
+        PaymentId.fromUuid(
+          UUID.fromString("9b2f1c3d-4e5a-4b6c-8d7e-9f0a1b2c3d4e")
+        )
+      )
+
   private val createPaymentEndpoint: PublicEndpoint[
     CreatePaymentRequest,
     CreatePaymentError,
@@ -67,27 +128,51 @@ object PaymentRoutes {
   ] =
     endpoint.post
       .in("payments")
-      .in(jsonBody[CreatePaymentRequest])
+      .in(
+        jsonBody[CreatePaymentRequest].example(
+          CreatePaymentRequest(
+            "3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f",
+            4999
+          )
+        )
+      )
       .out(statusCode(StatusCode.Created))
-      .out(jsonBody[PaymentResponse])
+      .out(jsonBody[PaymentResponse].example(examplePayment))
       .errorOut(
         oneOf[CreatePaymentError](
           oneOfVariant(
             statusCode(StatusCode.BadRequest)
-              .and(jsonBody[ErrorResponse])
+              .and(
+                errorBody(
+                  "`orderId` is blank or `amountCents` isn't positive.",
+                  ErrorResponse("orderId is required")
+                )
+              )
               .map[CreatePaymentError.Invalid](e =>
                 CreatePaymentError.Invalid(e.error)
               )(e => ErrorResponse(e.error))
           ),
           oneOfVariant(
             statusCode(StatusCode.Conflict)
-              .and(jsonBody[ErrorResponse])
+              .and(
+                errorBody(
+                  "The order already has a payment.",
+                  ErrorResponse(
+                    "Order 3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f already has a payment"
+                  )
+                )
+              )
               .map[CreatePaymentError.Conflict](e =>
                 CreatePaymentError.Conflict(e.error)
               )(e => ErrorResponse(e.error))
           )
         )
       )
+      .summary("Create a payment")
+      .description(
+        "Records a new payment in `pending` status for an order. `orderId` is unique: a second payment for the same order is `409`. Does not charge, authorize or publish an event — that is `POST /payments/authorize`."
+      )
+      .tag(tag)
 
   private def validate(req: CreatePaymentRequest): Either[String, OrderId] =
     PaymentRules.validate(req.orderId, req.amountCents)
@@ -96,7 +181,12 @@ object PaymentRoutes {
       : EndpointOutput.OneOfVariant[PaymentNotFound.type] =
     oneOfVariant(
       statusCode(StatusCode.NotFound)
-        .and(jsonBody[ErrorResponse])
+        .and(
+          errorBody(
+            "No payment with this id.",
+            ErrorResponse("Payment not found")
+          )
+        )
         .map[PaymentNotFound.type](_ => PaymentNotFound)(_ =>
           ErrorResponse("Payment not found")
         )
@@ -112,16 +202,24 @@ object PaymentRoutes {
     Any
   ] =
     endpoint.get
-      .in("payments" / path[PaymentId]("id"))
-      .out(jsonBody[PaymentResponse])
+      .in("payments" / idPath)
+      .out(jsonBody[PaymentResponse].example(examplePayment))
       .errorOut(paymentErrorOutput)
+      .summary("Get a payment")
+      .description("One payment by its UUID. Read-only.")
+      .tag(tag)
 
   private val deletePaymentEndpoint
       : PublicEndpoint[PaymentId, PaymentError, Unit, Any] =
     endpoint.delete
-      .in("payments" / path[PaymentId]("id"))
+      .in("payments" / idPath)
       .out(statusCode(StatusCode.NoContent))
       .errorOut(paymentErrorOutput)
+      .summary("Delete a payment")
+      .description(
+        "Hard-deletes the payment record. No event published. `404` when the id is unknown."
+      )
+      .tag(tag)
 
   def serverEndpoint[F[_]: MonadThrow](
       store: PaymentStore[F],

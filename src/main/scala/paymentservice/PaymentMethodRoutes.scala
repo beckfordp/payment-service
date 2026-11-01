@@ -9,6 +9,7 @@ import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
 import sttp.tapir._
+import sttp.tapir.Schema.annotations.{description, encodedExample}
 import sttp.tapir.generic.auto._
 import sttp.tapir.json.circe._
 import sttp.tapir.server.ServerEndpoint
@@ -19,10 +20,20 @@ import java.time.{YearMonth, ZoneOffset}
 /** `cardNumber` is the simulated PAN - request-only, tokenized immediately and
   * never stored, logged, or echoed back.
   */
+@description("A card and billing address to tokenize.")
 final case class CreatePaymentMethodRequest(
+    @description("Customer id (UUID).")
+    @encodedExample("c1f2a3b4-5d6e-4f70-8a9b-0c1d2e3f4a5b")
     customerId: String,
+    @description(
+      "Simulated PAN. Validated (length, digits, Luhn) and immediately tokenized; never stored, logged or returned."
+    )
+    @encodedExample("4242 4242 4242 4242")
     cardNumber: String,
+    @description("Card expiry, `MM/YY`; must not be in the past.")
+    @encodedExample("12/99")
     expiry: String,
+    @description("Billing address stored with the method.")
     billingAddress: Address
 )
 
@@ -30,10 +41,17 @@ object CreatePaymentMethodRequest {
   implicit val codec: Codec[CreatePaymentMethodRequest] = deriveCodec
 }
 
+@description("A tokenized payment method; never the PAN.")
 final case class PaymentMethodResponse(
+    @description("Payment method id (UUID).")
+    @encodedExample("5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b")
     id: String,
+    @description("Last four PAN digits.") @encodedExample("4242")
     last4: String,
+    @description("Card brand: `visa`, `mastercard`, `amex` or `other`.")
+    @encodedExample("visa")
     brand: String,
+    @description("Card expiry, `MM/YY`.") @encodedExample("12/99")
     expiry: String
 )
 
@@ -60,11 +78,32 @@ object PaymentMethodError {
   */
 object PaymentMethodRoutes {
 
+  // REST docs convention (purerest README "Documenting endpoints"): every
+  // endpoint, parameter, DTO field and error is described; PaymentDocsSuite
+  // asserts Docs.undocumented finds no gaps.
+  private val tag = "payment-methods"
+
+  private val exampleAddress =
+    Address("1 High Street", Some("Flat 2"), "London", "SW1A 1AA", "GB")
+
+  private val exampleMethod = PaymentMethodResponse(
+    "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b",
+    "4242",
+    "visa",
+    "12/99"
+  )
+
   private val invalidVariant
       : EndpointOutput.OneOfVariant[PaymentMethodError.Invalid] =
     oneOfVariant(
       statusCode(StatusCode.BadRequest)
-        .and(jsonBody[ErrorResponse])
+        .and(
+          jsonBody[ErrorResponse]
+            .description(
+              "`customerId` is blank, the card fails validation (length, digits, Luhn, or an expiry that isn't `MM/YY` or is in the past), or the billing address is invalid."
+            )
+            .example(ErrorResponse("Invalid card number"))
+        )
         .map[PaymentMethodError.Invalid](e =>
           PaymentMethodError.Invalid(e.error)
         )(e => ErrorResponse(e.error))
@@ -78,10 +117,24 @@ object PaymentMethodRoutes {
   ] =
     endpoint.post
       .in("payments" / "methods")
-      .in(jsonBody[CreatePaymentMethodRequest])
+      .in(
+        jsonBody[CreatePaymentMethodRequest].example(
+          CreatePaymentMethodRequest(
+            "c1f2a3b4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+            "4242 4242 4242 4242",
+            "12/99",
+            exampleAddress
+          )
+        )
+      )
       .out(statusCode(StatusCode.Created))
-      .out(jsonBody[PaymentMethodResponse])
+      .out(jsonBody[PaymentMethodResponse].example(exampleMethod))
       .errorOut(oneOf[PaymentMethodError](invalidVariant))
+      .summary("Create a payment method")
+      .description(
+        "Validates the card (length, digits, Luhn, expiry) and billing address, then stores only a simulated token, last four digits, brand and expiry. The PAN is never stored, logged or echoed back. Not idempotent — each call creates a new method."
+      )
+      .tag(tag)
 
   private def validate(
       req: CreatePaymentMethodRequest,
