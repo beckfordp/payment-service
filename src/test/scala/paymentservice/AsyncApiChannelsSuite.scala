@@ -145,13 +145,13 @@ class AsyncApiChannelsSuite extends FunSuite {
   test(
     "every consumed event's generated AsyncAPI message carries a description (copied from the producer's registry artifact)"
   ) {
-    val doc = purekafka.docs.AsyncApiDoc.generate(
+    val doc = AsyncApiDoc.generate(
       "test",
       "1.0",
       AsyncApiChannels.channels
     )
     val consumed = AsyncApiChannels.channels.filter(
-      _.direction == purekafka.docs.ChannelDirection.Subscribe
+      _.direction == ChannelDirection.Subscribe
     )
     assert(consumed.nonEmpty)
     for (c <- consumed)
