@@ -44,11 +44,11 @@ endpoint's error set. Mirrors order-service's `rest-docs_20261101` (TD-20.3).
 - Behaviour/wire changes; AsyncAPI side (TD-19).
 - Enforcing `customerId` as a parsed UUID (TD-16.1 L3) — documented as a UUID here only.
 
-## Appendix: proposed descriptions (2026-11-01, awaiting approval)
+## Appendix: approved descriptions (approved 2026-11-01)
 
 Convention: `@description` on the class and every field, `@encodedExample` on every
-field (Swagger builds the payload from them). Nothing below is applied to code until
-approved.
+field (Swagger builds the payload from them). Approved by the user on 2026-11-01 and
+applied in Phase 3.
 
 ### Endpoint summary / description / tag
 | Endpoint | summary | description | tag |
