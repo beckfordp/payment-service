@@ -581,6 +581,53 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
     }
   }
 
+  test(
+    "cancellation while the gateway is authorizing still releases the hold (TD-16.1 M2)"
+  ) {
+    for {
+      f <- fixture
+      holdPlaced <- cats.effect.Deferred[IO, Unit]
+      release <- cats.effect.Deferred[IO, Unit]
+      voided <- cats.effect.Ref.of[IO, List[String]](Nil)
+      slowGateway = new PaymentGatewayClient[IO] {
+        def authorize(token: String, amount: Int) =
+          holdPlaced.complete(()) *> release.get *> IO.pure(
+            Right(
+              Authorization(
+                "auth_slow",
+                java.time.Instant.parse("2099-11-03T12:00:00Z")
+              )
+            )
+          )
+        def capture(authId: String, cardToken: String) =
+          gateway.capture(authId, cardToken)
+        def void(authId: String) = voided.update(_ :+ authId)
+      }
+      routes = AuthorizeRoutes.routes[IO](
+        f.payments,
+        f.methods,
+        slowGateway,
+        NoOpLogger[IO]
+      )
+      fiber <- post(
+        routes,
+        AuthorizePaymentRequest("order-slow", 4999, f.approveId)
+      ).start
+      _ <- holdPlaced.get
+      cancelling <- fiber.cancel.start
+      _ <- IO.sleep(200.millis)
+      _ <- release.complete(())
+      _ <- cancelling.join
+      released <- voided.get.iterateUntil(_.nonEmpty).timeout(2.seconds)
+      recorded <- f.payments.findByOrderId(
+        OrderId.parse("order-slow").toOption.get
+      )
+    } yield {
+      assertEquals(released, List("auth_slow"))
+      assertEquals(recorded, None)
+    }
+  }
+
   test("replaying an expired authorization is a 409, not the stale authId") {
     for {
       f <- fixture

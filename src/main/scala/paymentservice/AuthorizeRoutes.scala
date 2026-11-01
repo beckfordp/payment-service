@@ -257,74 +257,84 @@ object AuthorizeRoutes {
         payments.findByOrderId(orderId).flatMap {
           case Some(existing) => replayExisting(existing, methodId)
           case None           =>
-            gateway.authorize(method.cardToken, req.amountCents).flatMap {
-              case Right(authorization) =>
-                payments
-                  .recordAuthorization(
-                    orderId,
-                    req.amountCents,
-                    method.id,
-                    authorization
+            // The gateway call places the hold: mask it and the record write
+            // behind it, polling only the write itself. A cancel arriving
+            // while `authorize` runs is therefore held until the finalizer
+            // below is installed, instead of stranding a hold at the gateway
+            // (TD-16.1 M2).
+            MonadCancelThrow[F].uncancelable { poll =>
+              gateway.authorize(method.cardToken, req.amountCents).flatMap {
+                case Right(authorization) =>
+                  poll(
+                    payments.recordAuthorization(
+                      orderId,
+                      req.amountCents,
+                      method.id,
+                      authorization
+                    )
                   )
-                  // Don't leave an unrecorded hold at the gateway if persisting
-                  // the authorization fails or the request is cancelled -
-                  // release it (`onError` alone misses `Canceled`).
-                  .guaranteeCase {
-                    case Outcome.Succeeded(_) => MonadCancelThrow[F].unit
-                    case Outcome.Errored(_) | Outcome.Canceled() =>
-                      gateway.void(authorization.authId).handleErrorWith {
-                        error =>
-                          logger.warn(
-                            context + ("auth_id" -> authorization.authId),
-                            error
-                          )("Releasing the unrecorded authorization failed")
-                      }
-                  }
-                  .flatMap {
-                    case Some(payment) =>
-                      logger
-                        .info(
-                          context + (
-                            "payment_id" -> PaymentId.render(payment.id)
+                    // Don't leave an unrecorded hold at the gateway if persisting
+                    // the authorization fails or the request is cancelled -
+                    // release it (`onError` alone misses `Canceled`).
+                    .guaranteeCase {
+                      case Outcome.Succeeded(_) => MonadCancelThrow[F].unit
+                      case Outcome.Errored(_) | Outcome.Canceled() =>
+                        gateway.void(authorization.authId).handleErrorWith {
+                          error =>
+                            logger.warn(
+                              context + ("auth_id" -> authorization.authId),
+                              error
+                            )("Releasing the unrecorded authorization failed")
+                        }
+                    }
+                    .flatMap {
+                      case Some(payment) =>
+                        logger
+                          .info(
+                            context + (
+                              "payment_id" -> PaymentId.render(payment.id)
+                            )
+                          )(
+                            "Payment authorized"
                           )
-                        )(
-                          "Payment authorized"
-                        )
-                        .as(
-                          Right(
-                            AuthorizePaymentResponse(
-                              authorization.authId,
-                              authorization.expiresAt
+                          .as(
+                            Right(
+                              AuthorizePaymentResponse(
+                                authorization.authId,
+                                authorization.expiresAt
+                              )
                             )
                           )
+                      case None =>
+                        replayAfterConflict(
+                          orderId,
+                          Some(authorization.authId),
+                          methodId
                         )
-                    case None =>
-                      replayAfterConflict(
+                    }
+                case Left(decline) =>
+                  poll(
+                    payments
+                      .recordDecline(
                         orderId,
-                        Some(authorization.authId),
-                        methodId
+                        req.amountCents,
+                        method.id,
+                        decline
                       )
-                  }
-              case Left(decline) =>
-                payments
-                  .recordDecline(
-                    orderId,
-                    req.amountCents,
-                    method.id,
-                    decline
                   )
-                  .flatMap {
-                    case Some(payment) =>
-                      logger
-                        .warn(
-                          context ++ Map(
-                            "payment_id" -> PaymentId.render(payment.id),
-                            "reason" -> decline.value
-                          )
-                        )("Payment declined")
-                        .as(Left(AuthorizeError.Declined(decline.value)))
-                    case None => replayAfterConflict(orderId, None, methodId)
-                  }
+                    .flatMap {
+                      case Some(payment) =>
+                        logger
+                          .warn(
+                            context ++ Map(
+                              "payment_id" -> PaymentId.render(payment.id),
+                              "reason" -> decline.value
+                            )
+                          )("Payment declined")
+                          .as(Left(AuthorizeError.Declined(decline.value)))
+                      case None => replayAfterConflict(orderId, None, methodId)
+                    }
+              }
             }
         }
       }
