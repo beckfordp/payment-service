@@ -180,7 +180,7 @@ object AuthorizeRoutes {
                   )
                 case (Some(authId), Some(expiresAt)) =>
                   Right(AuthorizePaymentResponse(authId, expiresAt))
-                case _ =>
+                case (None, _) | (_, None) =>
                   Left(
                     AuthorizeError.Internal(
                       "Stored authorization is incomplete"
@@ -271,7 +271,7 @@ object AuthorizeRoutes {
                   // release it (`onError` alone misses `Canceled`).
                   .guaranteeCase {
                     case Outcome.Succeeded(_) => MonadCancelThrow[F].unit
-                    case _                    =>
+                    case Outcome.Errored(_) | Outcome.Canceled() =>
                       gateway.void(authorization.authId).handleErrorWith {
                         error =>
                           logger.warn(

@@ -646,4 +646,91 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       List(Status.Conflict, Status.Conflict)
     )
   }
+
+  /** Replays `stored` for every order - the in-memory store can't hold an
+    * incomplete row, so this pins the replay's 500s (TD-16.1 H6).
+    */
+  private def replayOf(f: Fixture, stored: Payment): IO[Response[IO]] = {
+    val store = new PaymentStore[IO] {
+      def create(o: OrderId, a: Int) = f.payments.create(o, a)
+      def get(id: PaymentId) = f.payments.get(id)
+      def delete(id: PaymentId) = f.payments.delete(id)
+      def ping = f.payments.ping
+      def findByOrderId(o: OrderId) = IO.pure(Some(stored))
+      def recordAuthorization(
+          o: OrderId,
+          a: Int,
+          m: PaymentMethodId,
+          auth: Authorization
+      ) = f.payments.recordAuthorization(o, a, m, auth)
+      def recordDecline(
+          o: OrderId,
+          a: Int,
+          m: PaymentMethodId,
+          r: DeclineReason
+      ) = f.payments.recordDecline(o, a, m, r)
+      def recordCapture(o: OrderId) = f.payments.recordCapture(o)
+      def recordCaptureFailure(o: OrderId, r: String) =
+        f.payments.recordCaptureFailure(o, r)
+      def recordVoid(o: OrderId) = f.payments.recordVoid(o)
+    }
+    post(
+      AuthorizeRoutes.routes[IO](store, f.methods, gateway, NoOpLogger[IO]),
+      AuthorizePaymentRequest(OrderId.render(stored.orderId), 4999, f.approveId)
+    )
+  }
+
+  test("replaying an authorization missing its authId or expiry is a 500") {
+    val now = java.time.Instant.parse("2026-11-01T00:00:00Z")
+    val later = java.time.Instant.parse("2099-01-01T00:00:00Z")
+    for {
+      f <- fixture
+      methodId = PaymentMethodId.parse(f.approveId).toOption
+      base = Payment(
+        PaymentId.fromUuid(java.util.UUID.randomUUID()),
+        "order-incomplete",
+        4999,
+        PaymentStatus.Authorized,
+        now,
+        now,
+        paymentMethodId = methodId
+      )
+      responses <- List(
+        base.copy(authId = None, expiresAt = Some(later)),
+        base.copy(authId = Some("auth_x"), expiresAt = None),
+        base
+      ).traverse(replayOf(f, _))
+      bodies <- responses.traverse(_.as[ErrorResponse])
+    } yield {
+      assertEquals(
+        responses.map(_.status),
+        List.fill(3)(Status.InternalServerError)
+      )
+      assertEquals(
+        bodies.map(_.error).distinct,
+        List("Stored authorization is incomplete")
+      )
+    }
+  }
+
+  test("replaying a decline with no stored reason is a 500") {
+    val now = java.time.Instant.parse("2026-11-01T00:00:00Z")
+    for {
+      f <- fixture
+      stored = Payment(
+        PaymentId.fromUuid(java.util.UUID.randomUUID()),
+        "order-no-reason",
+        4999,
+        PaymentStatus.Failed,
+        now,
+        now,
+        paymentMethodId = PaymentMethodId.parse(f.approveId).toOption
+      )
+      response <- replayOf(f, stored)
+      body <- response.as[ErrorResponse]
+    } yield {
+      assertEquals(response.status, Status.InternalServerError)
+      assertEquals(body.error, "Stored decline has no reason")
+    }
+  }
 }
