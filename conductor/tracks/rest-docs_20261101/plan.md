@@ -12,6 +12,6 @@
 - [x] Task: coverage test first (`Docs.undocumented == Nil`, red) → apply the approved summaries/descriptions/tags, `id` parameter description+example, DTO/Address/error annotations + examples per spec Appendix; green — 0 gaps, full suite 209/209 1f0f228
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Descriptions and examples' (Protocol in workflow.md) — covered by Phase 4's verify script
 
-## Phase 4: Smoke test
-- [ ] Task: `scripts/verify-rest-docs.sh` adapted from order-service — run the service, fetch `/docs/docs.yaml`, assert summaries/descriptions/examples + narrowed errors; scalafmtCheck; CI green
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Smoke test' (Protocol in workflow.md) — `scripts/verify-rest-docs.sh` PASS
+## Phase 4: Smoke test [checkpoint: c606854]
+- [x] Task: `scripts/verify-rest-docs.sh` adapted from order-service — run the service, fetch `/docs/docs.yaml`, assert summaries/descriptions/examples + narrowed errors; scalafmtCheck; CI green — PASS, 845e94d
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Smoke test' (Protocol in workflow.md) — `scripts/verify-rest-docs.sh` PASS
