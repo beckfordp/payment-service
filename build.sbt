@@ -17,8 +17,9 @@ val testcontainersScalaVersion = "0.43.6"
 // support (ADR 0010). Pinned to match order-service's/inventory-service's
 // own version (0.3.0 adds purekafka.docs.SchemaRegistryWriter, Rework 5
 // step 3/ADR 0003).
+// v0.6.1: sends listed before receives (gluon TD-19.6).
 // v0.6.0: AsyncAPI 3.0 send/receive docs (gluon TD-19).
-val purekafkaVersion = "0.6.0"
+val purekafkaVersion = "0.6.1"
 // Pinned to match the purerestlib version this service is built against — see
 // README's "Consuming purerest as a dependency" section.
 val purerestlibVersion = "0.4.0"
