@@ -6,10 +6,10 @@
 - [x] Task: `PaymentRules.validate` shared by `POST /payments` and `/payments/authorize` (H5) 88b18d3
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Pure core' (Protocol in workflow.md) — ffb87f9
 
-## Phase 2: Typed errors and totality (H3, H4, H6)
+## Phase 2: Typed errors and totality (H3, H4, H6) [checkpoint: 4e45e18]
 - [x] Task: `PaymentStore.create` returns `Either[PaymentAlreadyExists, Payment]` (H3) e996f84
 - [x] Task: Exhaustive `Outcome` and replay matches in `AuthorizeRoutes` (H4, H6) 7ef1f11
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Typed errors' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Typed errors' (Protocol in workflow.md) — 4e45e18
 
 ## Phase 3: Capability, cancellation, DLQ (H1, M2, L1)
 - [ ] Task: Narrow `FulfilmentEventConsumer.handle` to `MonadThrow`+`Clock` (H1)
