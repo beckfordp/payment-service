@@ -8,7 +8,7 @@
 
 ## Phase 2: Typed errors and totality (H3, H4, H6)
 - [x] Task: `PaymentStore.create` returns `Either[PaymentAlreadyExists, Payment]` (H3) e996f84
-- [ ] Task: Exhaustive `Outcome` and replay matches in `AuthorizeRoutes` (H4, H6)
+- [x] Task: Exhaustive `Outcome` and replay matches in `AuthorizeRoutes` (H4, H6) 7ef1f11
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Typed errors' (Protocol in workflow.md)
 
 ## Phase 3: Capability, cancellation, DLQ (H1, M2, L1)
