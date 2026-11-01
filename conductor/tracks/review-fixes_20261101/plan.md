@@ -7,7 +7,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Pure core' (Protocol in workflow.md) — ffb87f9
 
 ## Phase 2: Typed errors and totality (H3, H4, H6)
-- [ ] Task: `PaymentStore.create` returns `Either[PaymentAlreadyExists, Payment]` (H3)
+- [x] Task: `PaymentStore.create` returns `Either[PaymentAlreadyExists, Payment]` (H3) e996f84
 - [ ] Task: Exhaustive `Outcome` and replay matches in `AuthorizeRoutes` (H4, H6)
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Typed errors' (Protocol in workflow.md)
 
