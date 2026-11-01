@@ -1,12 +1,16 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{
+  OrderId,
+  PaymentId,
+  PaymentMethodId,
+  PaymentStatus
+}
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import cats.effect.IO
 import cats.syntax.all._
 import munit.CatsEffectSuite
-import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 import org.http4s.circe.CirceEntityCodec._
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Status}

@@ -1,13 +1,18 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{
+  LiveAuthorization,
+  OrderId,
+  PaymentId,
+  PaymentMethodId,
+  PaymentStatus
+}
 import cats.Monad
 import cats.effect.{Async, Clock, Ref, Resource, Sync}
 import cats.effect.std.UUIDGen
 import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
-import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 import io.circe.syntax._
 import org.typelevel.otel4s.metrics.Meter
 import skunk.{Codec, Session}
@@ -293,8 +298,11 @@ object PaymentStore {
               entities.values.find(_.orderId == orderId) match {
                 case Some(existing)
                     if existing.status == PaymentStatus.Authorized &&
-                      (status != PaymentStatus.Captured ||
-                        existing.expiresAt.exists(_.isAfter(now))) =>
+                      LiveAuthorization.permits(
+                        status,
+                        existing.expiresAt,
+                        now
+                      ) =>
                   val next = existing.copy(
                     status = status,
                     updatedAt = now,
@@ -469,8 +477,8 @@ object PaymentStore {
   /** Conditional `expected -> status` transition. The `WHERE status = expected`
     * guard is the idempotency check: a duplicate `DispatchConfirmed` (or an
     * unknown order) updates nothing and returns no row, so no outbox event is
-    * written. With `requireLive` an expired authorization doesn't match either
-    *   - captures only.
+    * written. With the `LiveAuthorization.required` flag set (captures only) an
+    * expired authorization doesn't match either.
     */
   private val transitionPayment: skunk.Query[
     (PaymentStatus, Option[String], OrderId, PaymentStatus, Boolean),
@@ -708,7 +716,7 @@ object PaymentStore {
                               reason,
                               orderId,
                               PaymentStatus.Authorized,
-                              status == PaymentStatus.Captured
+                              LiveAuthorization.required(status)
                             )
                           )
                         )

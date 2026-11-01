@@ -1,12 +1,17 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{
+  LiveAuthorization,
+  OrderId,
+  PaymentId,
+  PaymentMethodId,
+  PaymentStatus
+}
 import cats.effect.{Async, Clock, MonadCancelThrow, Outcome}
 import cats.effect.syntax.all._
 import cats.syntax.all._
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
-import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 import org.http4s.HttpRoutes
 import org.typelevel.log4cats.StructuredLogger
 import sttp.model.StatusCode
@@ -168,7 +173,8 @@ object AuthorizeRoutes {
           existing.status match {
             case PaymentStatus.Authorized =>
               (existing.authId, existing.expiresAt) match {
-                case (Some(_), Some(expiresAt)) if !expiresAt.isAfter(now) =>
+                case (Some(_), expiresAt @ Some(_))
+                    if !LiveAuthorization.isLive(expiresAt, now) =>
                   Left(
                     AuthorizeError.AlreadyProcessed(
                       "Order's stored authorization has expired"

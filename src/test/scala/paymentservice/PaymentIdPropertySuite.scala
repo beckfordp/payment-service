@@ -1,12 +1,11 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{PaymentId, PaymentMethodId, PaymentStatus}
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
-import paymentservice.domain.{PaymentId, PaymentMethodId}
 
 class PaymentIdPropertySuite extends ScalaCheckSuite {
 

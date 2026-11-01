@@ -1,6 +1,6 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{OrderId, PaymentId, PaymentStatus}
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import cats.effect.{IO, Ref}
@@ -9,7 +9,6 @@ import io.circe.syntax._
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.otel4s.metrics.Meter
-import paymentservice.domain.{OrderId, PaymentId}
 import purekafka.consumer.DeadLetter
 import purekafka.resilience.{
   CircuitBreakerConfig,

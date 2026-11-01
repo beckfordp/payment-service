@@ -1,6 +1,6 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{LiveAuthorization, OrderId, PaymentStatus}
 import cats.effect.Async
 import cats.syntax.all._
 import fs2.Stream
@@ -9,7 +9,6 @@ import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
-import paymentservice.domain.OrderId
 import purekafka.consumer.DeadLetter
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.{description, encodedExample}
@@ -232,7 +231,11 @@ object FulfilmentEventConsumer {
                 case Some(method) =>
                   Async[F].realTimeInstant.flatMap { now =>
                     Async[F].raiseUnless(
-                      payment.expiresAt.exists(_.isAfter(now))
+                      LiveAuthorization.permits(
+                        PaymentStatus.Captured,
+                        payment.expiresAt,
+                        now
+                      )
                     )(AuthorizationExpired(orderId))
                   } *> gateway.capture(authId, method.cardToken).flatMap {
                     case Right(_) =>

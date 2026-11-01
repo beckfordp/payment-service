@@ -1,6 +1,6 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{OrderId, PaymentMethodId, PaymentStatus}
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import cats.effect.{IO, Ref}
@@ -10,7 +10,6 @@ import fs2.kafka._
 import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
-import paymentservice.domain.{OrderId, PaymentMethodId}
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.log4cats.testing.StructuredTestingLogger

@@ -1,11 +1,15 @@
 package paymentservice
 
-import paymentservice.domain.PaymentStatus
+import paymentservice.domain.{
+  OrderId,
+  PaymentId,
+  PaymentMethodId,
+  PaymentStatus
+}
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import cats.effect.IO
 import munit.CatsEffectSuite
-import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
 
 import java.time.Instant
 import java.util.UUID
