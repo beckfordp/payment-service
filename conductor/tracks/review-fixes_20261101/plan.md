@@ -13,6 +13,6 @@
 
 ## Phase 3: Capability, cancellation, DLQ (H1, M2, L1)
 - [x] Task: Narrow `FulfilmentEventConsumer.handle` to `MonadThrow`+`Clock` (H1) 96ea0c8
-- [~] Task: `uncancelable`+`poll` around authorize-then-record (M2)
-- [ ] Task: Dead-letter null-value `fulfilment-events` records (L1)
+- [x] Task: `uncancelable`+`poll` around authorize-then-record (M2) d1b90c2
+- [~] Task: Dead-letter null-value `fulfilment-events` records (L1)
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Capability, cancellation, DLQ' (Protocol in workflow.md)
