@@ -11,9 +11,20 @@ import org.typelevel.log4cats.StructuredLogger
 import paymentservice.domain.OrderId
 import purekafka.consumer.DeadLetter
 import sttp.tapir.Schema
+import sttp.tapir.Schema.annotations.{description, encodedExample}
 
 /** Local mirror of fulfilment-service's `DispatchFailed` payload (US-18.2). */
-final case class DispatchFailedEvent(orderId: String, reason: String)
+@description(
+  "Dispatch failed: pick/pack/dispatch hit an error. payment-service voids the hold; order-service marks the order failed."
+)
+final case class DispatchFailedEvent(
+    @description("Order UUID (order-service's order id).")
+    @encodedExample("3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f")
+    orderId: String,
+    @description("Why dispatch failed.")
+    @encodedExample("carrier_unavailable")
+    reason: String
+)
 
 object DispatchFailedEvent {
   implicit val codec: Codec[DispatchFailedEvent] = deriveCodec
@@ -22,9 +33,17 @@ object DispatchFailedEvent {
 
 /** Local mirror of fulfilment-service's `DispatchConfirmed` item shape. */
 final case class FulfilmentItem(
+    @description("Product SKU.")
+    @encodedExample("SKU-0042")
     sku: String,
+    @description("Product name at dispatch time.")
+    @encodedExample("Espresso cup")
     productName: String,
+    @description("Units dispatched.")
+    @encodedExample(2)
     quantity: Int,
+    @description("Unit price, in cents.")
+    @encodedExample(1250)
     unitPriceCents: Int
 )
 
@@ -40,9 +59,17 @@ object FulfilmentItem {
 
 /** Local mirror of fulfilment-service's `DispatchConfirmed` payload (US-19.1).
   */
+@description(
+  "Order dispatched: pick/pack/dispatch succeeded. Carries a full item snapshot so consumers need no order lookup."
+)
 final case class DispatchConfirmedEvent(
+    @description("Order UUID (order-service's order id).")
+    @encodedExample("3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f")
     orderId: String,
+    @description("Carrier tracking number.")
+    @encodedExample("TRK-123456789")
     trackingNo: String,
+    @description("Items dispatched. Always sent.")
     items: List[FulfilmentItem]
 )
 
