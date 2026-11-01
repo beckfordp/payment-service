@@ -12,7 +12,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Typed errors' (Protocol in workflow.md) — 4e45e18
 
 ## Phase 3: Capability, cancellation, DLQ (H1, M2, L1)
-- [ ] Task: Narrow `FulfilmentEventConsumer.handle` to `MonadThrow`+`Clock` (H1)
-- [ ] Task: `uncancelable`+`poll` around authorize-then-record (M2)
+- [x] Task: Narrow `FulfilmentEventConsumer.handle` to `MonadThrow`+`Clock` (H1) 96ea0c8
+- [~] Task: `uncancelable`+`poll` around authorize-then-record (M2)
 - [ ] Task: Dead-letter null-value `fulfilment-events` records (L1)
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Capability, cancellation, DLQ' (Protocol in workflow.md)
