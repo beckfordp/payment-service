@@ -1,7 +1,8 @@
 package paymentservice
 
 import paymentservice.domain.{LiveAuthorization, OrderId, PaymentStatus}
-import cats.effect.Async
+import cats.MonadThrow
+import cats.effect.{Async, Clock}
 import cats.syntax.all._
 import fs2.Stream
 import fs2.kafka._
@@ -132,7 +133,7 @@ object FulfilmentEventConsumer {
   /** One `fulfilment-events` record, minus the offset commit - split from
     * [[run]] so the logic and its DLQ routing are testable without a broker.
     */
-  def handle[F[_]: Async](
+  def handle[F[_]: MonadThrow: Clock](
       store: PaymentStore[F],
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
@@ -140,14 +141,14 @@ object FulfilmentEventConsumer {
       deadLetter: DeadLetter[F, String, String]
   )(key: String, value: Option[String]): F[Unit] = {
     def unrecorded(orderId: OrderId, target: PaymentStatus): F[Unit] =
-      Async[F].raiseError(UnrecordedTransition(orderId, target))
+      MonadThrow[F].raiseError(UnrecordedTransition(orderId, target))
 
     /** Schema drift must not silently stop captures: anything this consumer
       * can't act on goes to the DLQ raw instead of being committed with only a
       * log line.
       */
     def deadLetterRaw(raw: String, error: Throwable): F[Unit] =
-      deadLetter.guard(topic, key, raw)(Async[F].raiseError(error))
+      deadLetter.guard(topic, key, raw)(MonadThrow[F].raiseError(error))
 
     def handleDispatchFailed(
         orderId: OrderId,
@@ -168,7 +169,7 @@ object FulfilmentEventConsumer {
         case Some(payment) =>
           payment.authId match {
             case None =>
-              Async[F].raiseError(
+              MonadThrow[F].raiseError(
                 new RuntimeException(
                   s"Authorized payment ${payment.id} has no authId"
                 )
@@ -209,13 +210,13 @@ object FulfilmentEventConsumer {
         case Some(payment) =>
           (payment.authId, payment.paymentMethodId) match {
             case (None, _) =>
-              Async[F].raiseError(
+              MonadThrow[F].raiseError(
                 new RuntimeException(
                   s"Authorized payment ${payment.id} has no authId"
                 )
               )
             case (_, None) =>
-              Async[F].raiseError(
+              MonadThrow[F].raiseError(
                 new RuntimeException(
                   s"Authorized payment ${payment.id} has no paymentMethodId"
                 )
@@ -223,14 +224,14 @@ object FulfilmentEventConsumer {
             case (Some(authId), Some(paymentMethodId)) =>
               methods.get(paymentMethodId).flatMap {
                 case None =>
-                  Async[F].raiseError(
+                  MonadThrow[F].raiseError(
                     new RuntimeException(
                       s"Authorized payment ${payment.id} references unknown payment method $paymentMethodId"
                     )
                   )
                 case Some(method) =>
-                  Async[F].realTimeInstant.flatMap { now =>
-                    Async[F].raiseUnless(
+                  Clock[F].realTimeInstant.flatMap { now =>
+                    MonadThrow[F].raiseUnless(
                       LiveAuthorization.permits(
                         PaymentStatus.Captured,
                         payment.expiresAt,
@@ -260,7 +261,7 @@ object FulfilmentEventConsumer {
                             captureFailedReason
                           )
                           .flatMap {
-                            case Some(_) => Async[F].unit
+                            case Some(_) => MonadThrow[F].unit
                             case None    =>
                               unrecorded(orderId, PaymentStatus.Failed)
                           }

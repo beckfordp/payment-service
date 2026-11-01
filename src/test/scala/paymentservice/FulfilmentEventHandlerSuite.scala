@@ -141,6 +141,32 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       dl
     )(key, Some(raw))
 
+  /** Compiles only while `handle` asks for no more than `MonadThrow` + `Clock`
+    * (TD-16.1 H1) - the broker-facing `run` is the only part that needs
+    * `Async`.
+    */
+  private def narrowHandle[F[_]: cats.MonadThrow: cats.effect.Clock](
+      store: PaymentStore[F],
+      methods: PaymentMethodStore[F],
+      gw: PaymentGatewayClient[F],
+      logger: org.typelevel.log4cats.StructuredLogger[F],
+      dl: DeadLetter[F, String, String]
+  ): (String, Option[String]) => F[Unit] =
+    FulfilmentEventConsumer.handle[F](store, methods, gw, logger, dl)(_, _)
+
+  test("handle runs under MonadThrow + Clock alone") {
+    for {
+      f <- fixture
+      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dl <- deadLetter(dlq)
+      _ <- narrowHandle[IO](f.store, f.methods, gateway, NoOpLogger[IO], dl)(
+        "k",
+        Some(confirmed(f.orderId))
+      )
+      found <- f.store.findByOrderId(f.orderId)
+    } yield assertEquals(found.map(_.status), Some(PaymentStatus.Captured))
+  }
+
   test("a capture the store no longer records is dead-lettered") {
     for {
       f <- fixture
