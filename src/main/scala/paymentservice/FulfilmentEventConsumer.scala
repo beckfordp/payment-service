@@ -1,5 +1,6 @@
 package paymentservice
 
+import paymentservice.domain.PaymentStatus
 import cats.effect.Async
 import cats.syntax.all._
 import fs2.Stream

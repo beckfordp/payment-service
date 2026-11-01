@@ -1,4 +1,4 @@
-package paymentservice
+package paymentservice.domain
 
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions

@@ -1,5 +1,6 @@
 package paymentservice
 
+import paymentservice.domain.PaymentStatus
 import cats.effect.{Async, Clock, MonadCancelThrow, Outcome}
 import cats.effect.syntax.all._
 import cats.syntax.all._

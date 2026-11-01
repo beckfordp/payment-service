@@ -1,5 +1,6 @@
 package paymentservice
 
+import paymentservice.domain.PaymentStatus
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import cats.effect.{IO, Ref}

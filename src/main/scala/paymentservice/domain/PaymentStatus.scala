@@ -1,4 +1,4 @@
-package paymentservice
+package paymentservice.domain
 
 /** ADR 0011's authorize/capture split: `Authorized` holds funds (US-14.1),
   * `Captured` means money actually moved (US-19.1, Journey 4). `Voided`

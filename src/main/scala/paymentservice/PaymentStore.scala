@@ -1,5 +1,6 @@
 package paymentservice
 
+import paymentservice.domain.PaymentStatus
 import cats.Monad
 import cats.effect.{Async, Clock, Ref, Resource, Sync}
 import cats.effect.std.UUIDGen
