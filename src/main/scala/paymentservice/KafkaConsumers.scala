@@ -23,13 +23,13 @@ object KafkaConsumers {
       logger: StructuredLogger[F],
       meter: Meter[F]
   ): Stream[F, Unit] = {
-    def dlqProducerSettings: ProducerSettings[F, String, String] =
-      ProducerSettings[F, String, String]
+    def dlqProducerSettings: ProducerSettings[F, String, Option[String]] =
+      ProducerSettings[F, String, Option[String]]
         .withBootstrapServers(config.bootstrapServers)
 
     for {
       deadLetter <- Stream.resource(
-        DeadLetter.resource[F, String, String](
+        DeadLetter.resource[F, String, Option[String]](
           config.dlqRetry,
           config.dlqPublishResilience,
           dlqProducerSettings

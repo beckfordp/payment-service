@@ -36,9 +36,9 @@ class FulfilmentEventConsumerSuite
   private def configFor(kafka: KafkaContainer): KafkaConfig =
     KafkaConfig(bootstrapServers = kafka.bootstrapServers)
 
-  private def noOpDeadLetter: IO[DeadLetter[IO, String, String]] = {
+  private def noOpDeadLetter: IO[DeadLetter[IO, String, Option[String]]] = {
     import org.typelevel.otel4s.metrics.Meter.Implicits.noop
-    DeadLetter.fromPublish[IO, String, String](
+    DeadLetter.fromPublish[IO, String, Option[String]](
       RetryConfig(maxRetries = 0, baseDelay = 1.milli),
       ResilienceConfig(
         retry = RetryConfig(maxRetries = 0, baseDelay = 1.milli),
@@ -111,7 +111,7 @@ class FulfilmentEventConsumerSuite
       store: PaymentStore[IO],
       methods: PaymentMethodStore[IO],
       gateway: PaymentGatewayClient[IO],
-      deadLetter: DeadLetter[IO, String, String],
+      deadLetter: DeadLetter[IO, String, Option[String]],
       logger: StructuredLogger[IO] = NoOpLogger[IO]
   ): IO[Unit] =
     FulfilmentEventConsumer

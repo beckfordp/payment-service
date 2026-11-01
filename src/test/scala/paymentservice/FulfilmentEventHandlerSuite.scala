@@ -25,14 +25,14 @@ import scala.concurrent.duration._
   */
 class FulfilmentEventHandlerSuite extends CatsEffectSuite {
 
-  private type Dlq = Ref[IO, List[(String, String, String)]]
+  private type Dlq = Ref[IO, List[(String, String, Option[String])]]
 
   private def deadLetter(
       dlq: Dlq,
       maxRetries: Int = 0
-  ): IO[DeadLetter[IO, String, String]] = {
+  ): IO[DeadLetter[IO, String, Option[String]]] = {
     import org.typelevel.otel4s.metrics.Meter.Implicits.noop
-    DeadLetter.fromPublish[IO, String, String](
+    DeadLetter.fromPublish[IO, String, Option[String]](
       RetryConfig(maxRetries = maxRetries, baseDelay = 1.milli),
       ResilienceConfig(
         retry = RetryConfig(maxRetries = 0, baseDelay = 1.milli),
@@ -130,7 +130,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   private def handle(
       store: PaymentStore[IO],
       methods: PaymentMethodStore[IO],
-      dl: DeadLetter[IO, String, String],
+      dl: DeadLetter[IO, String, Option[String]],
       gw: PaymentGatewayClient[IO] = gateway
   )(key: String, raw: String): IO[Unit] =
     FulfilmentEventConsumer.handle[IO](
@@ -150,14 +150,14 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       methods: PaymentMethodStore[F],
       gw: PaymentGatewayClient[F],
       logger: org.typelevel.log4cats.StructuredLogger[F],
-      dl: DeadLetter[F, String, String]
+      dl: DeadLetter[F, String, Option[String]]
   ): (String, Option[String]) => F[Unit] =
     FulfilmentEventConsumer.handle[F](store, methods, gw, logger, dl)(_, _)
 
   test("handle runs under MonadThrow + Clock alone") {
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       _ <- narrowHandle[IO](f.store, f.methods, gateway, NoOpLogger[IO], dl)(
         "k",
@@ -170,7 +170,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   test("a capture the store no longer records is dead-lettered") {
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       store = new Delegating(f.store) {
         override def recordCapture(o: OrderId) = IO.pure(None)
@@ -180,14 +180,14 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       routed <- dlq.get
     } yield assertEquals(
       routed,
-      List(("fulfilment-events-dlq", f.orderId, raw))
+      List(("fulfilment-events-dlq", f.orderId, Some(raw)))
     )
   }
 
   test("a capture failure the store no longer records is dead-lettered") {
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       store = new Delegating(f.store) {
         override def recordCaptureFailure(o: OrderId, r: String) = IO.pure(None)
@@ -209,7 +209,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   test("a void the store no longer records is dead-lettered") {
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       store = new Delegating(f.store) {
         override def recordVoid(o: OrderId) = IO.pure(None)
@@ -224,7 +224,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   ) {
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq, maxRetries = 1)
       attempts <- Ref.of[IO, Int](0)
       captures <- Ref.of[IO, List[String]](Nil)
@@ -263,7 +263,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   test("a duplicate DispatchConfirmed after a capture is a no-op") {
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       raw = confirmed(f.orderId)
       _ <- handle(f.store, f.methods, dl)(f.orderId, raw)
@@ -282,11 +282,14 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   private def assertDeadLettered(raw: String) =
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       _ <- handle(f.store, f.methods, dl)("k", raw)
       routed <- dlq.get
-    } yield assertEquals(routed, List(("fulfilment-events-dlq", "k", raw)))
+    } yield assertEquals(
+      routed,
+      List(("fulfilment-events-dlq", "k", Some(raw)))
+    )
 
   test("an undecodable envelope is dead-lettered raw") {
     assertDeadLettered("{not json")
@@ -302,6 +305,25 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
 
   test("an unknown event type is dead-lettered raw") {
     assertDeadLettered(envelope("DispatchExploded", Json.obj()))
+  }
+
+  test("a null-value record is dead-lettered with its null value preserved") {
+    for {
+      f <- fixture
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
+      dl <- deadLetter(dlq)
+      _ <- FulfilmentEventConsumer.handle[IO](
+        f.store,
+        f.methods,
+        gateway,
+        NoOpLogger[IO],
+        dl
+      )("k", None)
+      routed <- dlq.get
+    } yield assertEquals(
+      routed,
+      List(("fulfilment-events-dlq", "k", None))
+    )
   }
 
   test(
@@ -322,7 +344,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
         method.id,
         Authorization("auth-old", Instant.parse("2020-01-01T00:00:00Z"))
       )
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       captures <- Ref.of[IO, List[String]](Nil)
       counting = new PaymentGatewayClient[IO] {
@@ -345,7 +367,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   test("DispatchConfirmed after a void is skipped without a capture") {
     for {
       f <- fixture
-      dlq <- Ref.of[IO, List[(String, String, String)]](Nil)
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
       dl <- deadLetter(dlq)
       captures <- Ref.of[IO, List[String]](Nil)
       counting = new PaymentGatewayClient[IO] {

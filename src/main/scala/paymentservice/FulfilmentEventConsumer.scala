@@ -117,7 +117,7 @@ object FulfilmentEventConsumer {
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
       logger: StructuredLogger[F],
-      deadLetter: DeadLetter[F, String, String]
+      deadLetter: DeadLetter[F, String, Option[String]]
   ): Stream[F, Unit] =
     KafkaConsumer
       .stream(consumerSettings[F](config))
@@ -138,7 +138,7 @@ object FulfilmentEventConsumer {
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
       logger: StructuredLogger[F],
-      deadLetter: DeadLetter[F, String, String]
+      deadLetter: DeadLetter[F, String, Option[String]]
   )(key: String, value: Option[String]): F[Unit] = {
     def unrecorded(orderId: OrderId, target: PaymentStatus): F[Unit] =
       MonadThrow[F].raiseError(UnrecordedTransition(orderId, target))
@@ -148,7 +148,7 @@ object FulfilmentEventConsumer {
       * log line.
       */
     def deadLetterRaw(raw: String, error: Throwable): F[Unit] =
-      deadLetter.guard(topic, key, raw)(MonadThrow[F].raiseError(error))
+      deadLetter.guard(topic, key, Some(raw))(MonadThrow[F].raiseError(error))
 
     def handleDispatchFailed(
         orderId: OrderId,
@@ -273,7 +273,13 @@ object FulfilmentEventConsumer {
     value match {
       case None =>
         logger.error(Map.empty)(
-          "Received fulfilment-events record with a null value - skipping"
+          "Received fulfilment-events record with a null value - dead-lettering it"
+        ) *> deadLetter.guard(topic, key, None)(
+          MonadThrow[F].raiseError(
+            new IllegalArgumentException(
+              "fulfilment-events record has a null value"
+            )
+          )
         )
       case Some(raw) =>
         decode[EventEnvelope](raw) match {
@@ -300,7 +306,7 @@ object FulfilmentEventConsumer {
                       case Left(error) =>
                         deadLetterRaw(raw, new IllegalArgumentException(error))
                       case Right(orderId) =>
-                        deadLetter.guard(topic, key, raw)(
+                        deadLetter.guard(topic, key, Some(raw))(
                           handleDispatchFailed(orderId, event)
                         )
                     }
@@ -319,7 +325,7 @@ object FulfilmentEventConsumer {
                       case Left(error) =>
                         deadLetterRaw(raw, new IllegalArgumentException(error))
                       case Right(orderId) =>
-                        deadLetter.guard(topic, key, raw)(
+                        deadLetter.guard(topic, key, Some(raw))(
                           handleDispatchConfirmed(orderId, event)
                         )
                     }
