@@ -1,0 +1,1 @@
+Phase 1 verification: scripts/verify-asyncapi-v3.sh passed — tests, scalafmt, asyncApiGenerate;spec is 3.0.0 and validates;operations: payment-events=send fulfilment-events=receive;2 consumed events described;schemaRegistryCheck against gluon's restored registry (2026-11-01).
