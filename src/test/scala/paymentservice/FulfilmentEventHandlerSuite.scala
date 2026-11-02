@@ -3,7 +3,7 @@ package paymentservice
 import paymentservice.domain.{OrderId, PaymentId, PaymentStatus}
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
-import cats.effect.{IO, Ref}
+import cats.effect.{Deferred, IO, Ref}
 import io.circe.Json
 import io.circe.syntax._
 import munit.CatsEffectSuite
@@ -431,5 +431,87 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
 
   test("an event with a blank orderId is dead-lettered raw") {
     assertDeadLettered(confirmed("  "))
+  }
+
+  private def orderCancelled(orderId: String): String =
+    EventEnvelope(
+      eventId = UUID.randomUUID().toString,
+      eventType = "OrderCancelled",
+      timestamp = Instant.parse("2026-01-01T00:00:00Z"),
+      source = "order-service",
+      correlationId = orderId,
+      payload = OrderCancelledEvent(
+        orderId,
+        "cust-1",
+        Instant.parse("2026-01-01T00:00:00Z"),
+        reason = Some("customer")
+      ).asJson
+    ).asJson.noSpaces
+
+  /** Both gateway calls block until the other has entered, so both handlers
+    * observe `Authorized` before either conditional store write.
+    */
+  private def latchedGateway: IO[PaymentGatewayClient[IO]] =
+    for {
+      entered <- Ref.of[IO, Int](0)
+      release <- Deferred[IO, Unit]
+    } yield new PaymentGatewayClient[IO] {
+      private def await(): IO[Unit] =
+        entered.updateAndGet(_ + 1).flatMap { n =>
+          if (n == 2) release.complete(()).void else release.get
+        }
+
+      def authorize(
+          cardToken: String,
+          amountCents: Int
+      ): IO[Either[DeclineReason, Authorization]] =
+        gateway.authorize(cardToken, amountCents)
+      def capture(
+          authId: String,
+          cardToken: String
+      ): IO[Either[DeclineReason, Unit]] =
+        await() *> IO.pure(Right(()))
+      def void(authId: String): IO[Unit] = await()
+    }
+
+  test(
+    "cancel racing dispatch: one terminal outcome, loser flagged, no DLQ"
+  ) {
+    for {
+      f <- fixture
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
+      dl <- deadLetter(dlq)
+      latched <- latchedGateway
+      _ <- IO.both(
+        OrderCancelledConsumer.handle(
+          f.store,
+          latched,
+          NoOpLogger[IO],
+          dl
+        )(f.orderId, Some(orderCancelled(f.orderId))),
+        FulfilmentEventConsumer.handle(
+          f.store,
+          f.methods,
+          latched,
+          NoOpLogger[IO],
+          dl
+        )(f.orderId, Some(confirmed(f.orderId)))
+      )
+      after <- f.store.findByOrderId(f.orderId)
+      reason <- f.store.reconciliationReason(f.orderId)
+      routed <- dlq.get
+      events <- f.outbox.get
+    } yield {
+      assert(
+        Set(PaymentStatus.Voided, PaymentStatus.Captured)
+          .contains(after.map(_.status).get)
+      )
+      assert(reason.isDefined, "the losing transition must be flagged")
+      assertEquals(routed, Nil)
+      assertEquals(
+        events.count(_._2.eventType == "PaymentCaptured"),
+        if (after.map(_.status).contains(PaymentStatus.Captured)) 1 else 0
+      )
+    }
   }
 }
