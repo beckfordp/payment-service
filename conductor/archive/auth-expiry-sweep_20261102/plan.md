@@ -23,3 +23,11 @@
 
 - Capture gateway call outside the transaction: a capture that succeeds just
   as the sweep voids it leaves a DLQ'd outcome; US-9.6/21 owns the fix.
+
+## Review (2026-11-02)
+
+- `sbt scalafmtCheck test` green (223 tests); `sbt schemaRegistryCheck` green.
+- `scripts/verify-auth-expiry.sh` passed live: payment voided
+  (`authorization_expired`), one `PaymentAuthorizationExpired` outbox row,
+  no duplicate on a second tick; the OrderCancelled void path also ran.
+- No blocking findings. Capture-vs-expiry gateway race remains US-9.6/21.
