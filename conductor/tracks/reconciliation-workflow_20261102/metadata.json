@@ -1,0 +1,8 @@
+{
+  "track_id": "reconciliation-workflow_20261102",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-11-02T16:00:00Z",
+  "updated_at": "2026-11-02T16:00:00Z",
+  "description": "ADM-4: open/resolved reconciliation queue and operator resolve (ADR 0026)"
+}

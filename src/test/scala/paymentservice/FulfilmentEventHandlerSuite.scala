@@ -1,6 +1,13 @@
 package paymentservice
 
-import paymentservice.domain.{OrderId, PaymentId, PaymentStatus}
+import paymentservice.domain.{
+  OrderId,
+  PaymentId,
+  PaymentStatus,
+  Reconciliation,
+  ReconciliationStatus,
+  ResolveReconciliationOutcome
+}
 import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import cats.effect.{Deferred, IO, Ref}
@@ -80,6 +87,18 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
     def flagReconciliation(o: OrderId, r: String) =
       underlying.flagReconciliation(o, r)
     def reconciliationReason(o: OrderId) = underlying.reconciliationReason(o)
+    def listReconciliations(
+        status: Option[ReconciliationStatus],
+        orderId: Option[OrderId]
+    ): IO[List[Reconciliation]] =
+      underlying.listReconciliations(status, orderId)
+    def resolveReconciliation(
+        orderId: OrderId,
+        operatorId: String,
+        note: Option[String],
+        resolvedAt: java.time.Instant
+    ): IO[ResolveReconciliationOutcome] =
+      underlying.resolveReconciliation(orderId, operatorId, note, resolvedAt)
     def expireDueAuthorizations(l: Int) =
       underlying.expireDueAuthorizations(l)
   }

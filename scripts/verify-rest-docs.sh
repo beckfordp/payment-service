@@ -89,6 +89,8 @@ allowed = {
     ("/payments/authorize", "post"): {"200", "400", "402", "404", "409", "500"},
     ("/health", "get"): {"200"},
     ("/health/ready", "get"): {"200", "503"},
+    ("/reconciliations", "get"): {"200", "400"},
+    ("/reconciliations/{orderId}", "patch"): {"200", "400", "401", "404"},
 }
 for (path, method), statuses in allowed.items():
     op = paths.get(path, {}).get(method)
@@ -127,7 +129,8 @@ check("POST /payments/methods request body has an example",
 for name in ["CreatePaymentRequest", "PaymentResponse", "CreatePaymentMethodRequest",
              "PaymentMethodResponse", "AuthorizePaymentRequest",
              "AuthorizePaymentResponse", "Address", "ErrorResponse",
-             "DeclinedResponse"]:
+             "DeclinedResponse", "ReconciliationResponse",
+             "ResolveReconciliationRequest"]:
     props = schemas.get(name, {}).get("properties", {})
     # A field that only references another component is described by it
     # (tapir folds a single-use field's description into the component).

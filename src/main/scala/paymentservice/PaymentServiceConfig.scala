@@ -46,6 +46,11 @@ final case class ExpirySweepConfig(
     batchSize: Int
 ) derives ConfigReader
 
+final case class OperatorAuthConfig(
+    token: Option[String],
+    operatorId: String
+) derives ConfigReader
+
 final case class PaymentServiceConfig(
     port: Int,
     metricsPort: Int,
@@ -54,7 +59,8 @@ final case class PaymentServiceConfig(
     postgres: PostgresConfig,
     paymentGateway: PaymentGatewayConfig,
     kafka: KafkaConfig,
-    expirySweep: ExpirySweepConfig
+    expirySweep: ExpirySweepConfig,
+    operatorAuth: OperatorAuthConfig
 ) derives ConfigReader
 
 object PaymentServiceConfig {

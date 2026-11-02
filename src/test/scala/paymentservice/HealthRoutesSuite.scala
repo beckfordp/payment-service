@@ -4,7 +4,14 @@ import paymentservice.TestConversions.given
 import scala.language.implicitConversions
 import cats.effect.IO
 import munit.CatsEffectSuite
-import paymentservice.domain.{OrderId, PaymentId, PaymentMethodId}
+import paymentservice.domain.{
+  OrderId,
+  PaymentId,
+  PaymentMethodId,
+  Reconciliation,
+  ReconciliationStatus,
+  ResolveReconciliationOutcome
+}
 import org.http4s.implicits._
 import org.http4s.{Method, Request, Status}
 
@@ -23,6 +30,17 @@ class HealthRoutesSuite extends CatsEffectSuite {
         IO.pure(false)
       def reconciliationReason(orderId: OrderId): IO[Option[String]] =
         IO.pure(None)
+      def listReconciliations(
+          status: Option[ReconciliationStatus],
+          orderId: Option[OrderId]
+      ): IO[List[Reconciliation]] = IO.pure(Nil)
+      def resolveReconciliation(
+          orderId: OrderId,
+          operatorId: String,
+          note: Option[String],
+          resolvedAt: java.time.Instant
+      ): IO[ResolveReconciliationOutcome] =
+        IO.pure(ResolveReconciliationOutcome.NotFound)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
@@ -61,6 +79,17 @@ class HealthRoutesSuite extends CatsEffectSuite {
         IO.pure(false)
       def reconciliationReason(orderId: OrderId): IO[Option[String]] =
         IO.pure(None)
+      def listReconciliations(
+          status: Option[ReconciliationStatus],
+          orderId: Option[OrderId]
+      ): IO[List[Reconciliation]] = IO.pure(Nil)
+      def resolveReconciliation(
+          orderId: OrderId,
+          operatorId: String,
+          note: Option[String],
+          resolvedAt: java.time.Instant
+      ): IO[ResolveReconciliationOutcome] =
+        IO.pure(ResolveReconciliationOutcome.NotFound)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)

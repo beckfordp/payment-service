@@ -4,7 +4,10 @@ import paymentservice.domain.{
   OrderId,
   PaymentId,
   PaymentMethodId,
-  PaymentStatus
+  PaymentStatus,
+  Reconciliation,
+  ReconciliationStatus,
+  ResolveReconciliationOutcome
 }
 import paymentservice.TestConversions.given
 import paymentservice.TestConversions.createOrFail
@@ -42,6 +45,17 @@ class PaymentRoutesSuite extends CatsEffectSuite {
         IO.pure(false)
       def reconciliationReason(orderId: OrderId): IO[Option[String]] =
         IO.pure(None)
+      def listReconciliations(
+          status: Option[ReconciliationStatus],
+          orderId: Option[OrderId]
+      ): IO[List[Reconciliation]] = IO.pure(Nil)
+      def resolveReconciliation(
+          orderId: OrderId,
+          operatorId: String,
+          note: Option[String],
+          resolvedAt: java.time.Instant
+      ): IO[ResolveReconciliationOutcome] =
+        IO.pure(ResolveReconciliationOutcome.NotFound)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] =
         IO.raiseError(error)
       def delete(id: PaymentId): IO[Boolean] = IO.raiseError(error)

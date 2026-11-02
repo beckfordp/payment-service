@@ -136,6 +136,12 @@ class PaymentDocsSuite extends CatsEffectSuite {
         docsGateway,
         logger
       ),
+      ReconciliationRoutes.listServerEndpoint[IO](store, logger),
+      ReconciliationRoutes.resolveServerEndpoint[IO](
+        store,
+        OperatorAuth.disabled,
+        logger
+      ),
       HealthRoutes.healthServerEndpoint[IO],
       HealthRoutes.readyServerEndpoint[IO](store)
     )
@@ -153,6 +159,8 @@ class PaymentDocsSuite extends CatsEffectSuite {
         List(404), // DELETE /payments/{id}
         List(400), // POST /payments/methods
         List(400, 402, 404, 409, 500), // POST /payments/authorize
+        List(400), // GET /reconciliations
+        List(400, 401, 404), // PATCH /reconciliations/{orderId}
         Nil, // GET /health
         List(503) // GET /health/ready
       )

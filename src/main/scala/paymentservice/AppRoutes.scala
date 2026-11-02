@@ -27,7 +27,8 @@ object AppRoutes {
       gateway: PaymentGatewayClient[F],
       telemetry: Telemetry[F],
       channels: List[AsyncApiChannel[?]],
-      staticAsyncApiDocsDir: String
+      staticAsyncApiDocsDir: String,
+      operatorAuth: OperatorAuth = OperatorAuth.disabled
   ): HttpRoutes[F] = {
     val docsRoutes = Docs.routes[F](
       "Payment Service",
@@ -43,6 +44,15 @@ object AppRoutes {
           store,
           methods,
           gateway,
+          telemetry.logger
+        ),
+        ReconciliationRoutes.listServerEndpoint[F](
+          store,
+          telemetry.logger
+        ),
+        ReconciliationRoutes.resolveServerEndpoint[F](
+          store,
+          operatorAuth,
           telemetry.logger
         ),
         HealthRoutes.healthServerEndpoint[F],

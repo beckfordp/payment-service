@@ -197,7 +197,18 @@ class MigrationsSuite extends CatsEffectSuite with TestContainerForAll {
               if (rs.next()) Some((rs.getString("column_name"), ())) else None
             )
             .toList
-          assertEquals(columns, List("order_id", "reason", "created_at"))
+          assertEquals(
+            columns,
+            List(
+              "order_id",
+              "reason",
+              "created_at",
+              "status",
+              "operator_id",
+              "note",
+              "resolved_at"
+            )
+          )
         } finally conn.close()
       }
     }

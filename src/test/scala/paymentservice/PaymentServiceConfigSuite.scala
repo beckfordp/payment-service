@@ -50,6 +50,10 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
       |  stream-supervisor { base-delay = 1s, max-delay = 30s }
       |}
       |expiry-sweep { interval = 30s, batch-size = 100 }
+      |operator-auth {
+      |  token = "dev-operator-token"
+      |  operator-id = "dev-operator"
+      |}
       |""".stripMargin
 
   test("loads a fully-specified config") {
@@ -94,7 +98,9 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
             ),
             streamSupervisor = StreamSupervisorConfig(1.second, 30.seconds)
           ),
-          expirySweep = ExpirySweepConfig(30.seconds, 100)
+          expirySweep = ExpirySweepConfig(30.seconds, 100),
+          operatorAuth =
+            OperatorAuthConfig(Some("dev-operator-token"), "dev-operator")
         )
       )
     )

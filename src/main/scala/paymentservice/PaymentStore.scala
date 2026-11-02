@@ -5,7 +5,10 @@ import paymentservice.domain.{
   OrderId,
   PaymentId,
   PaymentMethodId,
-  PaymentStatus
+  PaymentStatus,
+  Reconciliation,
+  ReconciliationStatus,
+  ResolveReconciliationOutcome
 }
 import cats.Monad
 import cats.effect.{Async, Clock, Ref, Resource, Sync}
@@ -14,6 +17,7 @@ import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
 import io.circe.syntax._
+import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.Meter
 import skunk.{Codec, Session}
 import skunk.circe.codec.all.jsonb
@@ -115,6 +119,24 @@ trait PaymentStore[F[_]] {
   def flagReconciliation(orderId: OrderId, reason: String): F[Boolean]
 
   def reconciliationReason(orderId: OrderId): F[Option[String]]
+
+  /** The open/resolved reconciliation queue (ADM-4). Both filters optional and
+    * ANDed; newest first.
+    */
+  def listReconciliations(
+      status: Option[ReconciliationStatus],
+      orderId: Option[OrderId]
+  ): F[List[Reconciliation]]
+
+  /** Resolves an open flag; the first resolver wins and a repeat returns the
+    * existing row untouched.
+    */
+  def resolveReconciliation(
+      orderId: OrderId,
+      operatorId: String,
+      note: Option[String],
+      resolvedAt: Instant
+  ): F[ResolveReconciliationOutcome]
 }
 
 object PaymentStore {
@@ -228,7 +250,7 @@ object PaymentStore {
     for {
       ref <- Ref.of[F, Map[PaymentId, Payment]](Map.empty)
       outboxRef <- Ref.of[F, List[(String, EventEnvelope)]](Nil)
-      reconciliationRef <- Ref.of[F, Map[OrderId, String]](Map.empty)
+      reconciliationRef <- Ref.of[F, Map[OrderId, Reconciliation]](Map.empty)
     } yield {
       def insert(
           orderId: OrderId,
@@ -426,14 +448,64 @@ object PaymentStore {
           findByOrderId(orderId).flatMap {
             case None    => Sync[F].pure(false)
             case Some(_) =>
-              reconciliationRef.modify { reasons =>
-                if (reasons.contains(orderId)) (reasons, false)
-                else (reasons + (orderId -> reason), true)
+              Sync[F].realTimeInstant.flatMap { now =>
+                reconciliationRef.modify { rows =>
+                  if (rows.contains(orderId)) (rows, false)
+                  else
+                    (
+                      rows + (orderId -> Reconciliation(
+                        orderId,
+                        reason,
+                        ReconciliationStatus.Open,
+                        now
+                      )),
+                      true
+                    )
+                }
               }
           }
 
         def reconciliationReason(orderId: OrderId): F[Option[String]] =
-          reconciliationRef.get.map(_.get(orderId))
+          reconciliationRef.get.map(_.get(orderId).map(_.reason))
+
+        def listReconciliations(
+            status: Option[ReconciliationStatus],
+            orderId: Option[OrderId]
+        ): F[List[Reconciliation]] =
+          reconciliationRef.get.map(
+            _.values
+              .filter(row => status.forall(_ == row.status))
+              .filter(row => orderId.forall(_ == row.orderId))
+              .toList
+              .sortBy(row => (row.createdAt, OrderId.render(row.orderId)))(using
+                Ordering[(Instant, String)].reverse
+              )
+          )
+
+        def resolveReconciliation(
+            orderId: OrderId,
+            operatorId: String,
+            note: Option[String],
+            resolvedAt: Instant
+        ): F[ResolveReconciliationOutcome] =
+          reconciliationRef.modify { rows =>
+            rows.get(orderId) match {
+              case None      => (rows, ResolveReconciliationOutcome.NotFound)
+              case Some(row) =>
+                row.resolve(operatorId, note, resolvedAt) match {
+                  case Some(resolved) =>
+                    (
+                      rows.updated(orderId, resolved),
+                      ResolveReconciliationOutcome.Resolved(resolved)
+                    )
+                  case None =>
+                    (
+                      rows,
+                      ResolveReconciliationOutcome.AlreadyResolved(row)
+                    )
+                }
+            }
+          }
       }
       (store, outboxRef)
     }
@@ -646,6 +718,111 @@ object PaymentStore {
       RETURNING order_id
     """.query(orderId)
 
+  private val optionalText: Codec[Option[String]] = text.opt
+
+  private val reconciliationStatusCodec: Codec[ReconciliationStatus] =
+    text.eimap(ReconciliationStatus.fromString)(_.asString)
+
+  private val reconciliationRow: Codec[
+    (
+        OrderId,
+        String,
+        ReconciliationStatus,
+        OffsetDateTime,
+        Option[String],
+        Option[String],
+        Option[OffsetDateTime]
+    )
+  ] =
+    orderId *: text *: reconciliationStatusCodec *: timestamptz *: text.opt *:
+      text.opt *: timestamptz.opt
+
+  private def toReconciliation(
+      row: (
+          OrderId,
+          String,
+          ReconciliationStatus,
+          OffsetDateTime,
+          Option[String],
+          Option[String],
+          Option[OffsetDateTime]
+      )
+  ): Reconciliation = {
+    val (orderId, reason, status, createdAt, operatorId, note, resolvedAt) =
+      row
+    Reconciliation(
+      orderId,
+      reason,
+      status,
+      createdAt.toInstant,
+      operatorId,
+      note,
+      resolvedAt.map(_.toInstant)
+    )
+  }
+
+  private val selectReconciliations: skunk.Query[
+    (Option[String], Option[String], Option[String], Option[String]),
+    (
+        OrderId,
+        String,
+        ReconciliationStatus,
+        OffsetDateTime,
+        Option[String],
+        Option[String],
+        Option[OffsetDateTime]
+    )
+  ] =
+    sql"""
+      SELECT order_id, reason, status, created_at, operator_id, note, resolved_at
+      FROM payment_reconciliation
+      WHERE ($optionalText IS NULL OR status = $optionalText)
+        AND ($optionalText IS NULL OR order_id = $optionalText)
+      ORDER BY created_at DESC, order_id
+    """.query(reconciliationRow)
+
+  private val selectReconciliationByOrderId: skunk.Query[
+    OrderId,
+    (
+        OrderId,
+        String,
+        ReconciliationStatus,
+        OffsetDateTime,
+        Option[String],
+        Option[String],
+        Option[OffsetDateTime]
+    )
+  ] =
+    sql"""
+      SELECT order_id, reason, status, created_at, operator_id, note, resolved_at
+      FROM payment_reconciliation
+      WHERE order_id = $orderId
+    """.query(reconciliationRow)
+
+  private val resolveReconciliationQuery: skunk.Query[
+    (String, Option[String], OffsetDateTime, OrderId),
+    (
+        OrderId,
+        String,
+        ReconciliationStatus,
+        OffsetDateTime,
+        Option[String],
+        Option[String],
+        Option[OffsetDateTime]
+    )
+  ] =
+    sql"""
+      UPDATE payment_reconciliation
+      SET status = 'resolved',
+          operator_id = $text,
+          note = $optionalText,
+          resolved_at = $timestamptz
+      WHERE order_id = $orderId
+        AND status = 'open'
+      RETURNING order_id, reason, status, created_at, operator_id, note,
+                resolved_at
+    """.query(reconciliationRow)
+
   def postgres[F[_]: Async: Console: Network](
       config: PostgresConfig,
       meter: Meter[F]
@@ -662,326 +839,413 @@ object PaymentStore {
       .evalMap { pool =>
         DbTimer
           .create(meter)
-          .map { timer =>
-            import timer.timed
+          .flatMap { timer =>
+            meter
+              .counter[Long]("reconciliation.flags.recorded")
+              .withDescription(
+                "Manual-reconciliation flags actually recorded (first-wins)."
+              )
+              .create
+              .map { flagsCounter =>
+                import timer.timed
 
-            def insertOutcome(
-                orderId: OrderId,
-                amountCents: Int,
-                status: PaymentStatus,
-                paymentMethodId: PaymentMethodId,
-                authId: Option[String],
-                expiresAt: Option[Instant],
-                declineReason: Option[String],
-                outbox: Option[EventEnvelope]
-            ): F[Option[Payment]] =
-              for {
-                id <- Sync[F].delay(UUID.randomUUID())
-                methodId = PaymentMethodId.uuid(paymentMethodId)
-                row <- timed("insert") {
-                  pool.use { session =>
-                    session.transaction.use { _ =>
-                      session
-                        .prepare(insertAuthorizeOutcome)
-                        .flatMap(
-                          _.option(
-                            (
-                              id,
-                              orderId,
-                              amountCents,
-                              status,
-                              methodId,
-                              authId,
-                              expiresAt.map(_.atOffset(ZoneOffset.UTC)),
-                              declineReason
+                def insertOutcome(
+                    orderId: OrderId,
+                    amountCents: Int,
+                    status: PaymentStatus,
+                    paymentMethodId: PaymentMethodId,
+                    authId: Option[String],
+                    expiresAt: Option[Instant],
+                    declineReason: Option[String],
+                    outbox: Option[EventEnvelope]
+                ): F[Option[Payment]] =
+                  for {
+                    id <- Sync[F].delay(UUID.randomUUID())
+                    methodId = PaymentMethodId.uuid(paymentMethodId)
+                    row <- timed("insert") {
+                      pool.use { session =>
+                        session.transaction.use { _ =>
+                          session
+                            .prepare(insertAuthorizeOutcome)
+                            .flatMap(
+                              _.option(
+                                (
+                                  id,
+                                  orderId,
+                                  amountCents,
+                                  status,
+                                  methodId,
+                                  authId,
+                                  expiresAt.map(_.atOffset(ZoneOffset.UTC)),
+                                  declineReason
+                                )
+                              )
                             )
+                            .flatMap {
+                              case None           => Sync[F].pure(None)
+                              case Some(inserted) =>
+                                outbox
+                                  .traverse_ { envelope =>
+                                    Sync[F]
+                                      .delay(UUID.randomUUID())
+                                      .flatMap { outboxId =>
+                                        session
+                                          .prepare(insertOutboxEvent)
+                                          .flatMap(
+                                            _.execute(
+                                              (
+                                                outboxId,
+                                                OrderId.render(orderId),
+                                                envelope,
+                                                envelope.correlationId
+                                              )
+                                            )
+                                          )
+                                      }
+                                  }
+                                  .as(Some(inserted))
+                            }
+                        }
+                      }
+                    }
+                  } yield row.map(toPayment(PaymentId.fromUuid(id), _))
+
+                new PaymentStore[F] {
+                  def create(
+                      orderId: OrderId,
+                      amountCents: Int
+                  ): F[Either[PaymentAlreadyExists, Payment]] =
+                    for {
+                      id <- Sync[F].delay(UUID.randomUUID())
+                      inserted <- timed("insert") {
+                        pool.use { session =>
+                          session
+                            .prepare(insertPayment)
+                            .flatMap(
+                              _.option(
+                                (id, orderId, amountCents, defaultStatus)
+                              )
+                            )
+                        }
+                      }
+                    } yield inserted
+                      .toRight(PaymentAlreadyExists(orderId))
+                      .map { case (createdAt, updatedAt) =>
+                        Payment(
+                          PaymentId.fromUuid(id),
+                          orderId,
+                          amountCents,
+                          defaultStatus,
+                          createdAt.toInstant,
+                          updatedAt.toInstant
+                        )
+                      }
+
+                  def get(id: PaymentId): F[Option[Payment]] =
+                    timed("select") {
+                      pool.use { session =>
+                        session
+                          .prepare(selectPayment)
+                          .flatMap(_.option(PaymentId.uuid(id)))
+                      }
+                    }.map(_.map(toPayment(id, _)))
+
+                  def delete(id: PaymentId): F[Boolean] =
+                    timed("delete") {
+                      pool.use { session =>
+                        session
+                          .prepare(deletePayment)
+                          .flatMap(_.option(PaymentId.uuid(id)))
+                          .map(_.isDefined)
+                      }
+                    }
+
+                  def ping: F[Boolean] =
+                    timed("ping") {
+                      pool.use(_.unique(pingQuery))
+                    }.attempt.map(_.isRight)
+
+                  def findByOrderId(orderId: OrderId): F[Option[Payment]] =
+                    timed("select") {
+                      pool.use { session =>
+                        session
+                          .prepare(selectPaymentByOrderId)
+                          .flatMap(_.option(orderId))
+                      }
+                    }.map(_.map { case (id, row) =>
+                      toPayment(PaymentId.fromUuid(id), row)
+                    })
+
+                  def flagReconciliation(
+                      orderId: OrderId,
+                      reason: String
+                  ): F[Boolean] =
+                    timed("flag_reconciliation") {
+                      pool.use { session =>
+                        session
+                          .prepare(insertReconciliationIfPaymentExists)
+                          .flatMap(_.option((orderId, reason, orderId)))
+                          .map(_.isDefined)
+                      }
+                    }.flatMap {
+                      case true =>
+                        flagsCounter
+                          .add(1L, List(Attribute("reason", reason)))
+                          .attempt
+                          .void
+                          .as(true)
+                      case false => Sync[F].pure(false)
+                    }
+
+                  def listReconciliations(
+                      status: Option[ReconciliationStatus],
+                      orderIdFilter: Option[OrderId]
+                  ): F[List[Reconciliation]] =
+                    timed("select_reconciliations") {
+                      pool.use(
+                        _.execute(selectReconciliations)(
+                          (
+                            status.map(_.asString),
+                            status.map(_.asString),
+                            orderIdFilter.map(OrderId.render),
+                            orderIdFilter.map(OrderId.render)
                           )
                         )
-                        .flatMap {
-                          case None           => Sync[F].pure(None)
-                          case Some(inserted) =>
-                            outbox
-                              .traverse_ { envelope =>
-                                Sync[F]
-                                  .delay(UUID.randomUUID())
-                                  .flatMap { outboxId =>
-                                    session
-                                      .prepare(insertOutboxEvent)
-                                      .flatMap(
-                                        _.execute(
-                                          (
-                                            outboxId,
-                                            OrderId.render(orderId),
-                                            envelope,
-                                            envelope.correlationId
-                                          )
-                                        )
-                                      )
-                                  }
-                              }
-                              .as(Some(inserted))
-                        }
-                    }
-                  }
-                }
-              } yield row.map(toPayment(PaymentId.fromUuid(id), _))
+                      )
+                    }.map(_.map(toReconciliation))
 
-            new PaymentStore[F] {
-              def create(
-                  orderId: OrderId,
-                  amountCents: Int
-              ): F[Either[PaymentAlreadyExists, Payment]] =
-                for {
-                  id <- Sync[F].delay(UUID.randomUUID())
-                  inserted <- timed("insert") {
-                    pool.use { session =>
-                      session
-                        .prepare(insertPayment)
-                        .flatMap(
-                          _.option((id, orderId, amountCents, defaultStatus))
+                  def resolveReconciliation(
+                      orderId: OrderId,
+                      operatorId: String,
+                      note: Option[String],
+                      resolvedAt: Instant
+                  ): F[ResolveReconciliationOutcome] =
+                    timed("resolve_reconciliation") {
+                      pool.use { session =>
+                        session.transaction.use { _ =>
+                          session
+                            .prepare(resolveReconciliationQuery)
+                            .flatMap(
+                              _.option(
+                                (
+                                  operatorId,
+                                  note,
+                                  OffsetDateTime.ofInstant(
+                                    resolvedAt,
+                                    ZoneOffset.UTC
+                                  ),
+                                  orderId
+                                )
+                              )
+                            )
+                            .flatMap {
+                              case Some(row) =>
+                                Sync[F].pure(
+                                  ResolveReconciliationOutcome.Resolved(
+                                    toReconciliation(row)
+                                  )
+                                )
+                              case None =>
+                                session
+                                  .prepare(selectReconciliationByOrderId)
+                                  .flatMap(_.option(orderId))
+                                  .map {
+                                    case Some(row) =>
+                                      ResolveReconciliationOutcome
+                                        .AlreadyResolved(
+                                          toReconciliation(row)
+                                        )
+                                    case None =>
+                                      ResolveReconciliationOutcome.NotFound
+                                  }
+                            }
+                        }
+                      }
+                    }
+
+                  def reconciliationReason(
+                      orderId: OrderId
+                  ): F[Option[String]] =
+                    timed("select_reconciliation_reason") {
+                      pool.use { session =>
+                        session
+                          .prepare(selectReconciliationReason)
+                          .flatMap(_.option(orderId))
+                      }
+                    }
+
+                  def recordAuthorization(
+                      orderId: OrderId,
+                      amountCents: Int,
+                      paymentMethodId: PaymentMethodId,
+                      authorization: Authorization
+                  ): F[Option[Payment]] =
+                    authorizedEnvelope[F](orderId, authorization).flatMap {
+                      envelope =>
+                        insertOutcome(
+                          orderId,
+                          amountCents,
+                          PaymentStatus.Authorized,
+                          paymentMethodId,
+                          Some(authorization.authId),
+                          Some(authorization.expiresAt),
+                          None,
+                          Some(envelope)
                         )
                     }
-                  }
-                } yield inserted
-                  .toRight(PaymentAlreadyExists(orderId))
-                  .map { case (createdAt, updatedAt) =>
-                    Payment(
-                      PaymentId.fromUuid(id),
-                      orderId,
-                      amountCents,
-                      defaultStatus,
-                      createdAt.toInstant,
-                      updatedAt.toInstant
-                    )
-                  }
 
-              def get(id: PaymentId): F[Option[Payment]] =
-                timed("select") {
-                  pool.use { session =>
-                    session
-                      .prepare(selectPayment)
-                      .flatMap(_.option(PaymentId.uuid(id)))
-                  }
-                }.map(_.map(toPayment(id, _)))
-
-              def delete(id: PaymentId): F[Boolean] =
-                timed("delete") {
-                  pool.use { session =>
-                    session
-                      .prepare(deletePayment)
-                      .flatMap(_.option(PaymentId.uuid(id)))
-                      .map(_.isDefined)
-                  }
-                }
-
-              def ping: F[Boolean] =
-                timed("ping") {
-                  pool.use(_.unique(pingQuery))
-                }.attempt.map(_.isRight)
-
-              def findByOrderId(orderId: OrderId): F[Option[Payment]] =
-                timed("select") {
-                  pool.use { session =>
-                    session
-                      .prepare(selectPaymentByOrderId)
-                      .flatMap(_.option(orderId))
-                  }
-                }.map(_.map { case (id, row) =>
-                  toPayment(PaymentId.fromUuid(id), row)
-                })
-
-              def flagReconciliation(
-                  orderId: OrderId,
-                  reason: String
-              ): F[Boolean] =
-                timed("flag_reconciliation") {
-                  pool.use { session =>
-                    session
-                      .prepare(insertReconciliationIfPaymentExists)
-                      .flatMap(_.option((orderId, reason, orderId)))
-                      .map(_.isDefined)
-                  }
-                }
-
-              def reconciliationReason(
-                  orderId: OrderId
-              ): F[Option[String]] =
-                timed("select_reconciliation_reason") {
-                  pool.use { session =>
-                    session
-                      .prepare(selectReconciliationReason)
-                      .flatMap(_.option(orderId))
-                  }
-                }
-
-              def recordAuthorization(
-                  orderId: OrderId,
-                  amountCents: Int,
-                  paymentMethodId: PaymentMethodId,
-                  authorization: Authorization
-              ): F[Option[Payment]] =
-                authorizedEnvelope[F](orderId, authorization).flatMap {
-                  envelope =>
+                  def recordDecline(
+                      orderId: OrderId,
+                      amountCents: Int,
+                      paymentMethodId: PaymentMethodId,
+                      reason: DeclineReason
+                  ): F[Option[Payment]] =
                     insertOutcome(
                       orderId,
                       amountCents,
-                      PaymentStatus.Authorized,
+                      PaymentStatus.Failed,
                       paymentMethodId,
-                      Some(authorization.authId),
-                      Some(authorization.expiresAt),
                       None,
-                      Some(envelope)
+                      None,
+                      Some(reason.value),
+                      None
                     )
-                }
 
-              def recordDecline(
-                  orderId: OrderId,
-                  amountCents: Int,
-                  paymentMethodId: PaymentMethodId,
-                  reason: DeclineReason
-              ): F[Option[Payment]] =
-                insertOutcome(
-                  orderId,
-                  amountCents,
-                  PaymentStatus.Failed,
-                  paymentMethodId,
-                  None,
-                  None,
-                  Some(reason.value),
-                  None
-                )
-
-              private def transitionFromAuthorized(
-                  orderId: OrderId,
-                  status: PaymentStatus,
-                  reason: Option[String],
-                  envelope: Option[Payment => F[EventEnvelope]]
-              ): F[Option[Payment]] =
-                Sync[F].fromEither(
-                  PaymentStatus.transition(PaymentStatus.Authorized, status)
-                ) *> timed("update") {
-                  pool.use { session =>
-                    session.transaction.use { _ =>
-                      session
-                        .prepare(transitionPayment)
-                        .flatMap(
-                          _.option(
-                            (
-                              status,
-                              reason,
-                              orderId,
-                              PaymentStatus.Authorized,
-                              LiveAuthorization.required(status)
+                  private def transitionFromAuthorized(
+                      orderId: OrderId,
+                      status: PaymentStatus,
+                      reason: Option[String],
+                      envelope: Option[Payment => F[EventEnvelope]]
+                  ): F[Option[Payment]] =
+                    Sync[F].fromEither(
+                      PaymentStatus.transition(PaymentStatus.Authorized, status)
+                    ) *> timed("update") {
+                      pool.use { session =>
+                        session.transaction.use { _ =>
+                          session
+                            .prepare(transitionPayment)
+                            .flatMap(
+                              _.option(
+                                (
+                                  status,
+                                  reason,
+                                  orderId,
+                                  PaymentStatus.Authorized,
+                                  LiveAuthorization.required(status)
+                                )
+                              )
                             )
-                          )
-                        )
-                        .flatMap {
-                          case None            => Sync[F].pure(None)
-                          case Some((id, row)) =>
-                            val payment = toPayment(PaymentId.fromUuid(id), row)
-                            envelope
-                              .traverse_ { build =>
-                                for {
-                                  event <- build(payment)
-                                  outboxId <- Sync[F].delay(UUID.randomUUID())
-                                  _ <- session
-                                    .prepare(insertOutboxEvent)
-                                    .flatMap(
-                                      _.execute(
-                                        (
-                                          outboxId,
-                                          OrderId.render(orderId),
-                                          event,
-                                          event.correlationId
-                                        )
+                            .flatMap {
+                              case None            => Sync[F].pure(None)
+                              case Some((id, row)) =>
+                                val payment =
+                                  toPayment(PaymentId.fromUuid(id), row)
+                                envelope
+                                  .traverse_ { build =>
+                                    for {
+                                      event <- build(payment)
+                                      outboxId <- Sync[F].delay(
+                                        UUID.randomUUID()
                                       )
-                                    )
-                                } yield ()
-                              }
-                              .as(Some(payment))
-                        }
-                    }
-                  }
-                }
-
-              def recordCapture(orderId: OrderId): F[Option[Payment]] =
-                transitionFromAuthorized(
-                  orderId,
-                  PaymentStatus.Captured,
-                  None,
-                  Some(capturedEnvelope[F])
-                )
-
-              def recordCaptureFailure(
-                  orderId: OrderId,
-                  reason: String
-              ): F[Option[Payment]] =
-                transitionFromAuthorized(
-                  orderId,
-                  PaymentStatus.Failed,
-                  Some(reason),
-                  Some(captureFailedEnvelope[F](_, reason))
-                )
-
-              def recordVoid(orderId: OrderId): F[Option[Payment]] =
-                transitionFromAuthorized(
-                  orderId,
-                  PaymentStatus.Voided,
-                  None,
-                  None
-                )
-
-              def expireDueAuthorizations(limit: Int): F[List[Payment]] =
-                timed("update_expired") {
-                  pool.use { session =>
-                    session.transaction.use { _ =>
-                      session
-                        .prepare(expireDueAuthorizationsQuery)
-                        .flatMap(
-                          _.stream(
-                            (
-                              PaymentStatus.Authorized,
-                              limit,
-                              PaymentStatus.Voided,
-                              authorizationExpiredReason
-                            ),
-                            64
-                          ).compile.toList
-                        )
-                        .flatMap { rows =>
-                          rows
-                            .traverse_ { case (id, row) =>
-                              val payment =
-                                toPayment(PaymentId.fromUuid(id), row)
-                              expiredEnvelope[F](payment).flatMap { event =>
-                                Sync[F]
-                                  .delay(UUID.randomUUID())
-                                  .flatMap { outboxId =>
-                                    session
-                                      .prepare(insertOutboxEvent)
-                                      .flatMap(
-                                        _.execute(
-                                          (
-                                            outboxId,
-                                            OrderId.render(payment.orderId),
-                                            event,
-                                            event.correlationId
+                                      _ <- session
+                                        .prepare(insertOutboxEvent)
+                                        .flatMap(
+                                          _.execute(
+                                            (
+                                              outboxId,
+                                              OrderId.render(orderId),
+                                              event,
+                                              event.correlationId
+                                            )
                                           )
                                         )
-                                      )
+                                    } yield ()
                                   }
-                              }
+                                  .as(Some(payment))
                             }
-                            .as(
-                              rows.map { case (id, row) =>
-                                toPayment(PaymentId.fromUuid(id), row)
-                              }
-                            )
                         }
+                      }
                     }
-                  }
+
+                  def recordCapture(orderId: OrderId): F[Option[Payment]] =
+                    transitionFromAuthorized(
+                      orderId,
+                      PaymentStatus.Captured,
+                      None,
+                      Some(capturedEnvelope[F])
+                    )
+
+                  def recordCaptureFailure(
+                      orderId: OrderId,
+                      reason: String
+                  ): F[Option[Payment]] =
+                    transitionFromAuthorized(
+                      orderId,
+                      PaymentStatus.Failed,
+                      Some(reason),
+                      Some(captureFailedEnvelope[F](_, reason))
+                    )
+
+                  def recordVoid(orderId: OrderId): F[Option[Payment]] =
+                    transitionFromAuthorized(
+                      orderId,
+                      PaymentStatus.Voided,
+                      None,
+                      None
+                    )
+
+                  def expireDueAuthorizations(limit: Int): F[List[Payment]] =
+                    timed("update_expired") {
+                      pool.use { session =>
+                        session.transaction.use { _ =>
+                          session
+                            .prepare(expireDueAuthorizationsQuery)
+                            .flatMap(
+                              _.stream(
+                                (
+                                  PaymentStatus.Authorized,
+                                  limit,
+                                  PaymentStatus.Voided,
+                                  authorizationExpiredReason
+                                ),
+                                64
+                              ).compile.toList
+                            )
+                            .flatMap { rows =>
+                              rows
+                                .traverse_ { case (id, row) =>
+                                  val payment =
+                                    toPayment(PaymentId.fromUuid(id), row)
+                                  expiredEnvelope[F](payment).flatMap { event =>
+                                    Sync[F]
+                                      .delay(UUID.randomUUID())
+                                      .flatMap { outboxId =>
+                                        session
+                                          .prepare(insertOutboxEvent)
+                                          .flatMap(
+                                            _.execute(
+                                              (
+                                                outboxId,
+                                                OrderId.render(payment.orderId),
+                                                event,
+                                                event.correlationId
+                                              )
+                                            )
+                                          )
+                                      }
+                                  }
+                                }
+                                .as(
+                                  rows.map { case (id, row) =>
+                                    toPayment(PaymentId.fromUuid(id), row)
+                                  }
+                                )
+                            }
+                        }
+                      }
+                    }
                 }
-            }
+              }
           }
       }
   }

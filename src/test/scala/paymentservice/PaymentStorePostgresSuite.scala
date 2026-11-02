@@ -4,7 +4,9 @@ import paymentservice.domain.{
   OrderId,
   PaymentId,
   PaymentMethodId,
-  PaymentStatus
+  PaymentStatus,
+  ReconciliationStatus,
+  ResolveReconciliationOutcome
 }
 import paymentservice.TestConversions.given
 import paymentservice.TestConversions.createOrFail
@@ -439,6 +441,63 @@ class PaymentStorePostgresSuite
           assertEquals(reason, Some("first"))
           assert(!unknown)
         }
+      }
+    }
+
+    test("list and resolve use the open/resolved workflow idempotently") {
+      withContainers { postgres =>
+        val config = configFor(postgres)
+        Migrations.run[IO](config) *> PaymentStore
+          .postgres[IO](config, Meter.noop[IO])
+          .use { store =>
+            val orderId =
+              OrderId.parse("resolve-order").getOrElse(fail("bad id"))
+            val resolvedAt = Instant.parse("2026-11-02T10:00:00Z")
+            for {
+              _ <- store.create(orderId, 1000)
+              _ <- store.flagReconciliation(orderId, "capture_after_void")
+              open <- store.listReconciliations(
+                Some(ReconciliationStatus.Open),
+                Some(orderId)
+              )
+              first <- store.resolveReconciliation(
+                orderId,
+                "op-1",
+                Some("refunded"),
+                resolvedAt
+              )
+              second <- store.resolveReconciliation(
+                orderId,
+                "op-2",
+                Some("later"),
+                resolvedAt.plusSeconds(60)
+              )
+              stored <- store.listReconciliations(None, Some(orderId))
+              missing <- store.resolveReconciliation(
+                OrderId.parse("unknown-order").getOrElse(fail("bad id")),
+                "op-1",
+                None,
+                resolvedAt
+              )
+            } yield {
+              assertEquals(open.map(_.reason), List("capture_after_void"))
+              first match {
+                case ResolveReconciliationOutcome.Resolved(row) =>
+                  assertEquals(row.status, ReconciliationStatus.Resolved)
+                  assertEquals(row.operatorId, Some("op-1"))
+                  assertEquals(row.resolvedAt, Some(resolvedAt))
+                case other => fail(s"expected Resolved, got: $other")
+              }
+              second match {
+                case ResolveReconciliationOutcome.AlreadyResolved(row) =>
+                  assertEquals(row.operatorId, Some("op-1"))
+                  assertEquals(row.note, Some("refunded"))
+                case other => fail(s"expected AlreadyResolved, got: $other")
+              }
+              assertEquals(stored.map(_.operatorId), List(Some("op-1")))
+              assertEquals(missing, ResolveReconciliationOutcome.NotFound)
+            }
+          }
       }
     }
   }
