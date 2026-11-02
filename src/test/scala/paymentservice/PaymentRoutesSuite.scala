@@ -38,6 +38,8 @@ class PaymentRoutesSuite extends CatsEffectSuite {
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] =
         IO.raiseError(error)
+      def expireDueAuthorizations(limit: Int): IO[List[Payment]] =
+        IO.raiseError(error)
       def delete(id: PaymentId): IO[Boolean] = IO.raiseError(error)
       def ping: IO[Boolean] = IO.raiseError(error)
       def findByOrderId(orderId: OrderId): IO[Option[Payment]] =

@@ -100,12 +100,21 @@ trait PaymentStore[F[_]] {
     * `recordCapture`.
     */
   def recordVoid(orderId: OrderId): F[Option[Payment]]
+
+  /** US-20.1: atomically moves up to `limit` due `Authorized` payments
+    * (`expires_at <= now()`) to `Voided` and writes one
+    * `PaymentAuthorizationExpired` outbox row per payment in the same
+    * transaction. The conditional update is the idempotency guard - a payment
+    * already captured or voided no longer matches, so it is never re-published.
+    */
+  def expireDueAuthorizations(limit: Int): F[List[Payment]]
 }
 
 object PaymentStore {
 
   private val defaultStatus = PaymentStatus.Pending
   private val eventSource = "payment-service"
+  private val authorizationExpiredReason = "authorization_expired"
 
   /** Envelope for `PaymentAuthorized` (ADR 0009), keyed and correlated by
     * `orderId` - the same choice order-service makes for its own events. Built
@@ -169,6 +178,24 @@ object PaymentStore {
         PaymentId.render(payment.id),
         payment.amountCents,
         reason,
+        timestamp
+      ).asJson
+    )
+
+  private def expiredEnvelope[F[_]: Monad: Clock: UUIDGen](
+      payment: Payment
+  ): F[EventEnvelope] =
+    for {
+      eventId <- UUIDGen[F].randomUUID.map(_.toString)
+      timestamp <- Clock[F].realTimeInstant
+    } yield EventEnvelope(
+      eventId = eventId,
+      eventType = "PaymentAuthorizationExpired",
+      timestamp = timestamp,
+      source = eventSource,
+      correlationId = OrderId.render(payment.orderId),
+      payload = PaymentAuthorizationExpiredEvent(
+        OrderId.render(payment.orderId),
         timestamp
       ).asJson
     )
@@ -350,6 +377,39 @@ object PaymentStore {
 
         def recordVoid(orderId: OrderId): F[Option[Payment]] =
           transitionFromAuthorized(orderId, PaymentStatus.Voided, None, None)
+
+        def expireDueAuthorizations(limit: Int): F[List[Payment]] =
+          for {
+            now <- Sync[F].realTimeInstant
+            due <- ref.modify { entities =>
+              val expired = entities.values
+                .filter(payment =>
+                  payment.status == PaymentStatus.Authorized &&
+                    LiveAuthorization.isExpired(payment.expiresAt, now)
+                )
+                .toList
+                .sortBy(_.expiresAt)
+                .take(limit)
+              val updated = expired.map(payment =>
+                payment.copy(
+                  status = PaymentStatus.Voided,
+                  updatedAt = now,
+                  declineReason = Some(authorizationExpiredReason)
+                )
+              )
+              (
+                entities ++ updated.map(payment => payment.id -> payment),
+                updated
+              )
+            }
+            _ <- due.traverse_ { payment =>
+              expiredEnvelope[F](payment).flatMap(envelope =>
+                outboxRef.update(
+                  _ :+ (OrderId.render(payment.orderId) -> envelope)
+                )
+              )
+            }
+          } yield due
       }
       (store, outboxRef)
     }
@@ -498,6 +558,33 @@ object PaymentStore {
         AND (NOT $bool OR expires_at > now())
       RETURNING id, order_id, amount_cents, status, created_at, updated_at,
                 payment_method_id, auth_id, expires_at, decline_reason
+    """.query(paymentWithIdRow)
+
+  /** US-20.1: `FOR UPDATE SKIP LOCKED` makes concurrent sweep ticks (or
+    * replicas) disjoint; the status/expiry predicate is the idempotency guard,
+    * so an already-captured or already-expired row is never returned twice.
+    */
+  private val expireDueAuthorizationsQuery: skunk.Query[
+    (PaymentStatus, Int, PaymentStatus, String),
+    (UUID, PaymentRow)
+  ] =
+    sql"""
+      WITH due AS (
+        SELECT order_id FROM "payment"
+        WHERE status = $paymentStatus AND expires_at <= now()
+        ORDER BY expires_at
+        LIMIT $int4
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE "payment" p
+      SET status = $paymentStatus,
+          decline_reason = $text,
+          updated_at = now()
+      FROM due
+      WHERE p.order_id = due.order_id
+      RETURNING p.id, p.order_id, p.amount_cents, p.status, p.created_at,
+                p.updated_at, p.payment_method_id, p.auth_id, p.expires_at,
+                p.decline_reason
     """.query(paymentWithIdRow)
 
   private val deletePayment: skunk.Query[UUID, UUID] =
@@ -780,6 +867,57 @@ object PaymentStore {
                   None,
                   None
                 )
+
+              def expireDueAuthorizations(limit: Int): F[List[Payment]] =
+                timed("update_expired") {
+                  pool.use { session =>
+                    session.transaction.use { _ =>
+                      session
+                        .prepare(expireDueAuthorizationsQuery)
+                        .flatMap(
+                          _.stream(
+                            (
+                              PaymentStatus.Authorized,
+                              limit,
+                              PaymentStatus.Voided,
+                              authorizationExpiredReason
+                            ),
+                            64
+                          ).compile.toList
+                        )
+                        .flatMap { rows =>
+                          rows
+                            .traverse_ { case (id, row) =>
+                              val payment =
+                                toPayment(PaymentId.fromUuid(id), row)
+                              expiredEnvelope[F](payment).flatMap { event =>
+                                Sync[F]
+                                  .delay(UUID.randomUUID())
+                                  .flatMap { outboxId =>
+                                    session
+                                      .prepare(insertOutboxEvent)
+                                      .flatMap(
+                                        _.execute(
+                                          (
+                                            outboxId,
+                                            OrderId.render(payment.orderId),
+                                            event,
+                                            event.correlationId
+                                          )
+                                        )
+                                      )
+                                  }
+                              }
+                            }
+                            .as(
+                              rows.map { case (id, row) =>
+                                toPayment(PaymentId.fromUuid(id), row)
+                              }
+                            )
+                        }
+                    }
+                  }
+                }
             }
           }
       }

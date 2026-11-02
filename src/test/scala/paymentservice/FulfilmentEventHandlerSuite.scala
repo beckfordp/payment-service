@@ -77,6 +77,8 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
     def recordCaptureFailure(o: OrderId, r: String) =
       underlying.recordCaptureFailure(o, r)
     def recordVoid(o: OrderId) = underlying.recordVoid(o)
+    def expireDueAuthorizations(l: Int) =
+      underlying.expireDueAuthorizations(l)
   }
 
   private final case class Fixture(

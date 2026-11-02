@@ -614,6 +614,43 @@ class PaymentStorePostgresSuite
     }
   }
 
+  test(
+    "expireDueAuthorizations voids a due authorization and writes one PaymentAuthorizationExpired row"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      val expired = Authorization(
+        "auth_expired",
+        java.time.Instant.parse("2020-01-01T00:00:00Z")
+      )
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store
+            .recordAuthorization(orderId, 4999, method.id, expired)
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
+          first <- store.expireDueAuthorizations(10)
+          second <- store.expireDueAuthorizations(10)
+          found <- store.findByOrderId(orderId)
+        } yield {
+          assertEquals(first.map(_.status), List(PaymentStatus.Voided))
+          assertEquals(second, Nil)
+          assertEquals(found.map(_.status), Some(PaymentStatus.Voided))
+          assertEquals(
+            found.flatMap(_.declineReason),
+            Some("authorization_expired")
+          )
+          assertEquals(
+            query(
+              postgres,
+              s"select payload->>'eventType' from outbox_events where aggregate_id = '$orderId' order by created_at"
+            ),
+            List("PaymentAuthorized", "PaymentAuthorizationExpired")
+          )
+        }
+      }
+    }
+  }
+
   test("recordVoid returns None for a non-authorized payment, unchanged") {
     withContainers { postgres =>
       val orderId = java.util.UUID.randomUUID().toString

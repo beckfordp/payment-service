@@ -1,0 +1,8 @@
+{
+  "track_id": "auth-expiry-sweep_20261102",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-11-02T00:00:00Z",
+  "updated_at": "2026-11-02T00:00:00Z",
+  "description": "US-20.1 + US-9.3: expiry sweep and OrderCancelled void (Journey 5)"
+}

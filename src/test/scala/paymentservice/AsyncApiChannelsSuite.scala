@@ -20,7 +20,7 @@ class AsyncApiChannelsSuite extends FunSuite {
   private val sampleInstant = Instant.parse("2026-10-26T00:00:00Z")
 
   test(
-    "AsyncApiChannels.channels registers the four payment-events contracts and both consumed fulfilment events"
+    "AsyncApiChannels.channels registers the four payment-events contracts, both consumed fulfilment events and OrderCancelled"
   ) {
     assertEquals(
       AsyncApiChannels.channels.map(c => c.topic -> c.eventType).toSet,
@@ -30,13 +30,14 @@ class AsyncApiChannelsSuite extends FunSuite {
         "payment-events" -> "PaymentAuthorizationExpired",
         "payment-events" -> "PaymentFailed",
         "fulfilment-events" -> "DispatchFailed",
-        "fulfilment-events" -> "DispatchConfirmed"
+        "fulfilment-events" -> "DispatchConfirmed",
+        "order-events" -> "OrderCancelled"
       )
     )
   }
 
   test(
-    "payment-events contracts are Publish(Cdc); fulfilment-events contracts are Subscribe-only"
+    "payment-events contracts are Publish(Cdc); fulfilment-events and order-events contracts are Subscribe-only"
   ) {
     for (
       channel <- AsyncApiChannels.channels.filter(_.topic == "payment-events")
@@ -47,7 +48,9 @@ class AsyncApiChannelsSuite extends FunSuite {
         s"expected ${channel.eventType} to be Publish(Cdc)"
       )
 
-    for (eventType <- List("DispatchFailed", "DispatchConfirmed")) {
+    for (
+      eventType <- List("DispatchFailed", "DispatchConfirmed", "OrderCancelled")
+    ) {
       val consumed = AsyncApiChannels.channels
         .find(_.eventType == eventType)
         .getOrElse(fail(s"expected a $eventType channel"))
@@ -93,6 +96,12 @@ class AsyncApiChannelsSuite extends FunSuite {
       trackingNo = "TRACK-1",
       items = List(FulfilmentItem("sku-1", "Widget", 1, 4999))
     )
+    val cancelled = OrderCancelledEvent(
+      orderId = "o-1",
+      customerId = "c-1",
+      timestamp = sampleInstant,
+      reason = Some("customer")
+    )
 
     def keysOf(value: io.circe.Json): Set[String] =
       value.asObject.map(_.keys.toSet).getOrElse(Set.empty)
@@ -116,6 +125,10 @@ class AsyncApiChannelsSuite extends FunSuite {
     assertEquals(
       keysOf(confirmed.asJson),
       Set("orderId", "trackingNo", "items")
+    )
+    assertEquals(
+      keysOf(cancelled.asJson),
+      Set("orderId", "customerId", "timestamp", "reason")
     )
   }
 

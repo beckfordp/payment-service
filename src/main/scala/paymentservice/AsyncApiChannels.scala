@@ -57,6 +57,11 @@ object AsyncApiChannels extends AsyncApiChannelsProvider {
       eventType = "DispatchConfirmed",
       direction = ChannelDirection.Subscribe
     ),
+    AsyncApiChannel[OrderCancelledEvent](
+      topic = OrderCancelledConsumer.topic,
+      eventType = "OrderCancelled",
+      direction = ChannelDirection.Subscribe
+    ),
     AsyncApiChannel[PaymentAuthorizationExpiredEvent](
       topic = paymentEventsTopic,
       eventType = "PaymentAuthorizationExpired",

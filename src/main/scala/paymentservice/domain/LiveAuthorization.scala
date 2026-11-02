@@ -21,6 +21,10 @@ object LiveAuthorization {
   def isLive(expiresAt: Option[Instant], now: Instant): Boolean =
     expiresAt.exists(_.isAfter(now))
 
+  /** The sweep's own predicate: a hold whose `expiresAt` is now or earlier. */
+  def isExpired(expiresAt: Option[Instant], now: Instant): Boolean =
+    expiresAt.exists(!_.isAfter(now))
+
   /** Whether moving an authorized payment to `target` is allowed at `now`. */
   def permits(
       target: PaymentStatus,

@@ -295,6 +295,81 @@ class PaymentStoreSuite extends CatsEffectSuite {
     } yield assertEquals(result, None)
   }
 
+  private val expiredAuthorization =
+    Authorization("auth_expired", Instant.parse("2020-01-01T00:00:00Z"))
+
+  test(
+    "expireDueAuthorizations voids a due authorization and emits PaymentAuthorizationExpired"
+  ) {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- store
+        .recordAuthorization("order-1", 4999, paymentMethodId, expiredAuthorization)
+        .map(_.getOrElse(fail("expected the authorization to be inserted")))
+      expired <- store.expireDueAuthorizations(10)
+      payment <- store.findByOrderId("order-1")
+      events <- outbox.get
+    } yield {
+      assertEquals(expired.map(_.status), List(PaymentStatus.Voided))
+      assertEquals(payment.map(_.status), Some(PaymentStatus.Voided))
+      assertEquals(
+        payment.flatMap(_.declineReason),
+        Some("authorization_expired")
+      )
+      assertEquals(
+        events.map(_._2.eventType),
+        List("PaymentAuthorized", "PaymentAuthorizationExpired")
+      )
+      val event =
+        events.last._2.payload.as[PaymentAuthorizationExpiredEvent].toOption.get
+      assertEquals(event.orderId, "order-1")
+    }
+  }
+
+  test("expireDueAuthorizations leaves a live authorization alone") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- authorizedPayment(store)
+      expired <- store.expireDueAuthorizations(10)
+      payment <- store.findByOrderId("order-1")
+      events <- outbox.get
+    } yield {
+      assertEquals(expired, Nil)
+      assertEquals(payment.map(_.status), Some(PaymentStatus.Authorized))
+      assertEquals(events.map(_._2.eventType), List("PaymentAuthorized"))
+    }
+  }
+
+  test("a repeated expiry sweep does not re-publish a voided payment") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- store
+        .recordAuthorization("order-1", 4999, paymentMethodId, expiredAuthorization)
+        .map(_.getOrElse(fail("expected the authorization to be inserted")))
+      first <- store.expireDueAuthorizations(10)
+      second <- store.expireDueAuthorizations(10)
+      events <- outbox.get
+    } yield {
+      assertEquals(first.size, 1)
+      assertEquals(second, Nil)
+      assertEquals(
+        events.count(_._2.eventType == "PaymentAuthorizationExpired"),
+        1
+      )
+    }
+  }
+
+  test("expireDueAuthorizations leaves a captured payment alone") {
+    for {
+      (store, _) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- authorizedPayment(store)
+      _ <- store
+        .recordCapture("order-1")
+        .map(_.getOrElse(fail("expected the capture")))
+      expired <- store.expireDueAuthorizations(10)
+    } yield assertEquals(expired, Nil)
+  }
+
   test("recordCapture returns None for a non-authorized payment") {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]

@@ -38,6 +38,14 @@ final case class KafkaConfig(
       StreamSupervisorConfig(baseDelay = 1.second, maxDelay = 30.seconds)
 ) derives ConfigReader
 
+/** US-20.1: how often the in-process expiry sweep runs, and how many due
+  * authorizations one transaction may expire.
+  */
+final case class ExpirySweepConfig(
+    interval: FiniteDuration,
+    batchSize: Int
+) derives ConfigReader
+
 final case class PaymentServiceConfig(
     port: Int,
     metricsPort: Int,
@@ -45,7 +53,8 @@ final case class PaymentServiceConfig(
     asyncApiHtmlDir: String,
     postgres: PostgresConfig,
     paymentGateway: PaymentGatewayConfig,
-    kafka: KafkaConfig
+    kafka: KafkaConfig,
+    expirySweep: ExpirySweepConfig
 ) derives ConfigReader
 
 object PaymentServiceConfig {

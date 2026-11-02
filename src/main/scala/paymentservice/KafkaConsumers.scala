@@ -9,9 +9,10 @@ import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Meter
 import purekafka.consumer.{DeadLetter, StreamSupervisor}
 
-/** Supervises the `fulfilment-events` consumer independently, with its own DLQ
-  * (`fulfilment-events-dlq`). It handles `DispatchFailed` (US-18.2, void) and
-  * `DispatchConfirmed` (US-19.1, capture).
+/** Supervises the `fulfilment-events` and `order-events` consumers
+  * independently, each with its own DLQ. The first handles `DispatchFailed`
+  * (US-18.2, void) and `DispatchConfirmed` (US-19.1, capture); the second
+  * handles `OrderCancelled` (US-9.3, void).
   */
 object KafkaConsumers {
 
@@ -28,27 +29,48 @@ object KafkaConsumers {
         .withBootstrapServers(config.bootstrapServers)
 
     for {
-      deadLetter <- Stream.resource(
+      fulfilmentDeadLetter <- Stream.resource(
         DeadLetter.resource[F, String, Option[String]](
           config.dlqRetry,
           config.dlqPublishResilience,
           dlqProducerSettings
         )(logger)(meter)
       )
-      result <- StreamSupervisor.supervise[F, Unit](config.streamSupervisor)(
-        logger
-      )(meter)(
-        Async[F].pure(
-          FulfilmentEventConsumer.run[F](
-            config,
-            store,
-            methods,
-            gateway,
-            logger,
-            deadLetter
+      orderDeadLetter <- Stream.resource(
+        DeadLetter.resource[F, String, Option[String]](
+          config.dlqRetry,
+          config.dlqPublishResilience,
+          dlqProducerSettings
+        )(logger)(meter)
+      )
+      result <- StreamSupervisor
+        .supervise[F, Unit](config.streamSupervisor)(logger)(meter)(
+          Async[F].pure(
+            FulfilmentEventConsumer.run[F](
+              config,
+              store,
+              methods,
+              gateway,
+              logger,
+              fulfilmentDeadLetter
+            )
           )
         )
-      )
+        .merge(
+          StreamSupervisor.supervise[F, Unit](config.streamSupervisor)(
+            logger
+          )(meter)(
+            Async[F].pure(
+              OrderCancelledConsumer.run[F](
+                config,
+                store,
+                gateway,
+                logger,
+                orderDeadLetter
+              )
+            )
+          )
+        )
     } yield result
   }
 

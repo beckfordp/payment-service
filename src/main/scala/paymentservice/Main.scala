@@ -33,6 +33,11 @@ object Main extends IOApp.Simple {
       )("payment-service starting")
     )
     store <- PaymentStore.postgres[IO](config.postgres, telemetry.meter)
+    _ <- ExpirySweep.resource[IO](
+      config.expirySweep,
+      store,
+      telemetry.logger
+    )
     methods <- PaymentMethodStore.postgres[IO](config.postgres, telemetry.meter)
     gateway = PaymentGatewayClient.simulated[IO](
       config.paymentGateway.simulated

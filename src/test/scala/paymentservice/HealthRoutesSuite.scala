@@ -19,6 +19,7 @@ class HealthRoutesSuite extends CatsEffectSuite {
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)
+      def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
       def findByOrderId(orderId: OrderId): IO[Option[Payment]] =
@@ -52,6 +53,7 @@ class HealthRoutesSuite extends CatsEffectSuite {
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)
+      def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)
       def findByOrderId(orderId: OrderId): IO[Option[Payment]] =

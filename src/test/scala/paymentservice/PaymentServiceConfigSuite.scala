@@ -49,6 +49,7 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
       |  }
       |  stream-supervisor { base-delay = 1s, max-delay = 30s }
       |}
+      |expiry-sweep { interval = 30s, batch-size = 100 }
       |""".stripMargin
 
   test("loads a fully-specified config") {
@@ -92,7 +93,8 @@ class PaymentServiceConfigSuite extends CatsEffectSuite {
               circuitBreaker = KafkaCircuitBreakerConfig(5, 30.seconds)
             ),
             streamSupervisor = StreamSupervisorConfig(1.second, 30.seconds)
-          )
+          ),
+          expirySweep = ExpirySweepConfig(30.seconds, 100)
         )
       )
     )
