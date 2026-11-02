@@ -108,6 +108,13 @@ trait PaymentStore[F[_]] {
     * already captured or voided no longer matches, so it is never re-published.
     */
   def expireDueAuthorizations(limit: Int): F[List[Payment]]
+
+  /** Records a manual-reconciliation flag for an order (US-21.4), first-wins.
+    * Returns false for an unknown order.
+    */
+  def flagReconciliation(orderId: OrderId, reason: String): F[Boolean]
+
+  def reconciliationReason(orderId: OrderId): F[Option[String]]
 }
 
 object PaymentStore {
@@ -221,6 +228,7 @@ object PaymentStore {
     for {
       ref <- Ref.of[F, Map[PaymentId, Payment]](Map.empty)
       outboxRef <- Ref.of[F, List[(String, EventEnvelope)]](Nil)
+      reconciliationRef <- Ref.of[F, Map[OrderId, String]](Map.empty)
     } yield {
       def insert(
           orderId: OrderId,
@@ -410,6 +418,22 @@ object PaymentStore {
               )
             }
           } yield due
+
+        def flagReconciliation(
+            orderId: OrderId,
+            reason: String
+        ): F[Boolean] =
+          findByOrderId(orderId).flatMap {
+            case None    => Sync[F].pure(false)
+            case Some(_) =>
+              reconciliationRef.modify { reasons =>
+                if (reasons.contains(orderId)) (reasons, false)
+                else (reasons + (orderId -> reason), true)
+              }
+          }
+
+        def reconciliationReason(orderId: OrderId): F[Option[String]] =
+          reconciliationRef.get.map(_.get(orderId))
       }
       (store, outboxRef)
     }
@@ -607,6 +631,21 @@ object PaymentStore {
     int4
   )
 
+  private val selectReconciliationReason: skunk.Query[OrderId, String] =
+    sql"""
+      SELECT reason FROM payment_reconciliation WHERE order_id = $orderId
+    """.query(text)
+
+  private val insertReconciliationIfPaymentExists
+      : skunk.Query[(OrderId, String, OrderId), OrderId] =
+    sql"""
+      INSERT INTO payment_reconciliation (order_id, reason)
+      SELECT $orderId, $text
+      WHERE EXISTS (SELECT 1 FROM "payment" WHERE order_id = $orderId)
+      ON CONFLICT (order_id) DO NOTHING
+      RETURNING order_id
+    """.query(orderId)
+
   def postgres[F[_]: Async: Console: Network](
       config: PostgresConfig,
       meter: Meter[F]
@@ -750,6 +789,30 @@ object PaymentStore {
                 }.map(_.map { case (id, row) =>
                   toPayment(PaymentId.fromUuid(id), row)
                 })
+
+              def flagReconciliation(
+                  orderId: OrderId,
+                  reason: String
+              ): F[Boolean] =
+                timed("flag_reconciliation") {
+                  pool.use { session =>
+                    session
+                      .prepare(insertReconciliationIfPaymentExists)
+                      .flatMap(_.option((orderId, reason, orderId)))
+                      .map(_.isDefined)
+                  }
+                }
+
+              def reconciliationReason(
+                  orderId: OrderId
+              ): F[Option[String]] =
+                timed("select_reconciliation_reason") {
+                  pool.use { session =>
+                    session
+                      .prepare(selectReconciliationReason)
+                      .flatMap(_.option(orderId))
+                  }
+                }
 
               def recordAuthorization(
                   orderId: OrderId,

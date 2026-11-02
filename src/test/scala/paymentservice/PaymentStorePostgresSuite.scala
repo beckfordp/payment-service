@@ -417,6 +417,33 @@ class PaymentStorePostgresSuite
   }
 
   test(
+    "reconciliation flags are first-wins and require a payment row"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store.recordAuthorization(
+            orderId,
+            4999,
+            method.id,
+            authorization
+          )
+          first <- store.flagReconciliation(orderId, "first")
+          second <- store.flagReconciliation(orderId, "second")
+          reason <- store.reconciliationReason(orderId)
+          unknown <- store.flagReconciliation("unknown-order", "x")
+        } yield {
+          assert(first)
+          assert(!second)
+          assertEquals(reason, Some("first"))
+          assert(!unknown)
+        }
+      }
+    }
+  }
+
+  test(
     "recordAuthorization rolls back the payment row when the outbox write fails"
   ) {
     withContainers { postgres =>

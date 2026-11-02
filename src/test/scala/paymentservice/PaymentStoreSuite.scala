@@ -286,6 +286,44 @@ class PaymentStoreSuite extends CatsEffectSuite {
     }
   }
 
+  test("concurrent recordVoid and recordCapture have exactly one winner") {
+    for {
+      (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
+      _ <- authorizedPayment(store)
+      results <- IO.both(
+        store.recordVoid("order-1"),
+        store.recordCapture("order-1")
+      )
+      events <- outbox.get
+    } yield {
+      val (voided, captured) = results
+      assertEquals(
+        List(voided.isDefined, captured.isDefined).count(identity),
+        1
+      )
+      assertEquals(
+        events.count(_._2.eventType == "PaymentCaptured"),
+        if (captured.isDefined) 1 else 0
+      )
+    }
+  }
+
+  test("reconciliation flags are first-wins; unknown orders return false") {
+    for {
+      store <- PaymentStore.inMemory[IO]
+      _ <- authorizedPayment(store)
+      first <- store.flagReconciliation("order-1", "first")
+      second <- store.flagReconciliation("order-1", "second")
+      reason <- store.reconciliationReason("order-1")
+      unknown <- store.flagReconciliation("order-unknown", "x")
+    } yield {
+      assert(first)
+      assert(!second)
+      assertEquals(reason, Some("first"))
+      assert(!unknown)
+    }
+  }
+
   test("recordCapture after recordVoid returns None (voided is terminal)") {
     for {
       store <- PaymentStore.inMemory[IO]

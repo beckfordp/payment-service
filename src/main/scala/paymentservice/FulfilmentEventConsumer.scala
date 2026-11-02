@@ -1,6 +1,11 @@
 package paymentservice
 
-import paymentservice.domain.{LiveAuthorization, OrderId, PaymentStatus}
+import paymentservice.domain.{
+  LiveAuthorization,
+  OrderId,
+  PaymentRace,
+  PaymentStatus
+}
 import cats.MonadThrow
 import cats.effect.{Async, Clock}
 import cats.syntax.all._
@@ -141,8 +146,6 @@ object FulfilmentEventConsumer {
       logger: StructuredLogger[F],
       deadLetter: DeadLetter[F, String, Option[String]]
   )(key: String, value: Option[String]): F[Unit] = {
-    def unrecorded(orderId: OrderId, target: PaymentStatus): F[Unit] =
-      MonadThrow[F].raiseError(UnrecordedTransition(orderId, target))
 
     /** Schema drift must not silently stop captures: anything this consumer
       * can't act on goes to the DLQ raw instead of being committed with only a
@@ -160,6 +163,18 @@ object FulfilmentEventConsumer {
           logger.warn(Map("order_id" -> event.orderId))(
             "DispatchFailed for an unknown payment - skipping"
           )
+        case Some(payment) if payment.status == PaymentStatus.Voided =>
+          logger.info(Map("order_id" -> event.orderId))(
+            "DispatchFailed for an already-voided payment - skipping duplicate"
+          )
+        case Some(payment) if payment.status == PaymentStatus.Captured =>
+          logger.warn(
+            Map(
+              "order_id" -> event.orderId,
+              "status" -> payment.status.asString
+            )
+          )("DispatchFailed after capture - reconciliation flagged") *>
+            store.flagReconciliation(orderId, "void_after_capture").void
         case Some(payment) if payment.status != PaymentStatus.Authorized =>
           logger.warn(
             Map(
@@ -183,7 +198,13 @@ object FulfilmentEventConsumer {
                       Map("order_id" -> event.orderId)
                     )("Authorization voided")
                   case None =>
-                    unrecorded(orderId, PaymentStatus.Voided)
+                    PaymentRace.afterNone(
+                      store,
+                      logger,
+                      orderId,
+                      PaymentStatus.Voided,
+                      "DispatchFailed"
+                    )
                 }
           }
       }
@@ -201,6 +222,22 @@ object FulfilmentEventConsumer {
           logger.info(Map("order_id" -> event.orderId))(
             "DispatchConfirmed for an already-captured payment - skipping duplicate"
           )
+        case Some(payment) if payment.status == PaymentStatus.Voided =>
+          logger.warn(
+            Map(
+              "order_id" -> event.orderId,
+              "status" -> payment.status.asString
+            )
+          )("Capture after void - reconciliation flagged") *>
+            store.flagReconciliation(orderId, "capture_after_void").void
+        case Some(payment) if payment.status == PaymentStatus.Failed =>
+          logger.warn(
+            Map(
+              "order_id" -> event.orderId,
+              "status" -> payment.status.asString
+            )
+          )("Capture after a failed payment - reconciliation flagged") *>
+            store.flagReconciliation(orderId, "capture_after_failed").void
         case Some(payment) if payment.status != PaymentStatus.Authorized =>
           logger.warn(
             Map(
@@ -232,40 +269,64 @@ object FulfilmentEventConsumer {
                   )
                 case Some(method) =>
                   Clock[F].realTimeInstant.flatMap { now =>
-                    MonadThrow[F].raiseUnless(
+                    if (
                       LiveAuthorization.permits(
                         PaymentStatus.Captured,
                         payment.expiresAt,
                         now
                       )
-                    )(AuthorizationExpired(orderId))
-                  } *> gateway.capture(authId, method.cardToken).flatMap {
-                    case Right(_) =>
-                      store.recordCapture(orderId).flatMap {
-                        case Some(_) =>
-                          logger.info(
-                            Map("order_id" -> event.orderId)
-                          )("Payment captured")
-                        case None =>
-                          unrecorded(orderId, PaymentStatus.Captured)
-                      }
-                    case Left(decline) =>
-                      logger.warn(
-                        Map(
-                          "order_id" -> event.orderId,
-                          "reason" -> decline.value
-                        )
-                      )("Capture declined - recording PaymentFailed") *>
-                        store
-                          .recordCaptureFailure(
-                            orderId,
-                            captureFailedReason
-                          )
-                          .flatMap {
-                            case Some(_) => MonadThrow[F].unit
-                            case None    =>
-                              unrecorded(orderId, PaymentStatus.Failed)
+                    )
+                      gateway.capture(authId, method.cardToken).flatMap {
+                        case Right(_) =>
+                          store.recordCapture(orderId).flatMap {
+                            case Some(_) =>
+                              logger.info(
+                                Map("order_id" -> event.orderId)
+                              )("Payment captured")
+                            case None =>
+                              PaymentRace.afterNone(
+                                store,
+                                logger,
+                                orderId,
+                                PaymentStatus.Captured,
+                                "DispatchConfirmed"
+                              )
                           }
+                        case Left(decline) =>
+                          logger.warn(
+                            Map(
+                              "order_id" -> event.orderId,
+                              "reason" -> decline.value
+                            )
+                          )("Capture declined - recording PaymentFailed") *>
+                            store
+                              .recordCaptureFailure(
+                                orderId,
+                                captureFailedReason
+                              )
+                              .flatMap {
+                                case Some(_) => MonadThrow[F].unit
+                                case None    =>
+                                  PaymentRace.afterNone(
+                                    store,
+                                    logger,
+                                    orderId,
+                                    PaymentStatus.Failed,
+                                    "DispatchConfirmed"
+                                  )
+                              }
+                      }
+                    else
+                      store
+                        .flagReconciliation(
+                          orderId,
+                          "dispatch_after_authorization_expired"
+                        ) *>
+                        logger.warn(
+                          Map("order_id" -> event.orderId)
+                        )(
+                          "Capture after authorization expiry - reconciliation flagged"
+                        )
                   }
               }
           }
@@ -346,15 +407,6 @@ object FulfilmentEventConsumer {
     }
   }
 }
-
-/** The gateway call succeeded but the conditional store write matched no
-  * authorized row - raised so the record is retried / dead-lettered instead of
-  * committed with the payment out of step with the gateway.
-  */
-final case class AuthorizationExpired(orderId: OrderId)
-    extends RuntimeException(
-      s"Authorization for order ${OrderId.render(orderId)} expired before it was captured"
-    )
 
 final case class UnrecordedTransition(orderId: OrderId, target: PaymentStatus)
     extends RuntimeException(

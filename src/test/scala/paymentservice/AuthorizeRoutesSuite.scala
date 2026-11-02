@@ -136,6 +136,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = payments.create(o, a)
         def get(id: PaymentId) = payments.get(id)
         def recordVoid(o: OrderId) = payments.recordVoid(o)
+        def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+          IO.pure(false)
+        def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = payments.delete(id)
@@ -247,6 +251,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
+        def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+          IO.pure(false)
+        def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -445,6 +453,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
+        def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+          IO.pure(false)
+        def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -499,6 +511,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
+        def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+          IO.pure(false)
+        def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -551,6 +567,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
+        def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+          IO.pure(false)
+        def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -732,6 +752,10 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       def recordCaptureFailure(o: OrderId, r: String) =
         f.payments.recordCaptureFailure(o, r)
       def recordVoid(o: OrderId) = f.payments.recordVoid(o)
+      def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+        IO.pure(false)
+      def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+        IO.pure(None)
       def expireDueAuthorizations(l: Int) =
         f.payments.expireDueAuthorizations(l)
     }

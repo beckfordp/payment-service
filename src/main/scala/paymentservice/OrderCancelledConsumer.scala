@@ -9,7 +9,7 @@ import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
-import paymentservice.domain.{OrderId, PaymentStatus}
+import paymentservice.domain.{OrderId, PaymentRace, PaymentStatus}
 import purekafka.consumer.DeadLetter
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.{description, encodedExample}
@@ -81,6 +81,18 @@ object OrderCancelledConsumer {
             "reason" -> event.reason.getOrElse("-")
           )
         )("OrderCancelled for an already-voided payment - skipping duplicate")
+      case Some(payment) if payment.status == PaymentStatus.Captured =>
+        logger.warn(
+          Map(
+            "order_id" -> event.orderId,
+            "status" -> payment.status.asString,
+            "reason" -> event.reason.getOrElse("-")
+          )
+        )(
+          "OrderCancelled after capture - reconciliation flagged"
+        ) *> store
+          .flagReconciliation(orderId, "void_after_capture")
+          .void
       case Some(payment) if payment.status != PaymentStatus.Authorized =>
         logger.warn(
           Map(
@@ -108,8 +120,12 @@ object OrderCancelledConsumer {
                     )
                   )("Authorization voided on order cancellation")
                 case None =>
-                  MonadThrow[F].raiseError(
-                    UnrecordedTransition(orderId, PaymentStatus.Voided)
+                  PaymentRace.afterNone(
+                    store,
+                    logger,
+                    orderId,
+                    PaymentStatus.Voided,
+                    "OrderCancelled"
                   )
               }
         }

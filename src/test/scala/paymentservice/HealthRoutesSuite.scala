@@ -19,6 +19,10 @@ class HealthRoutesSuite extends CatsEffectSuite {
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)
+      def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+        IO.pure(false)
+      def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+        IO.pure(None)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
@@ -53,6 +57,10 @@ class HealthRoutesSuite extends CatsEffectSuite {
         IO.raiseError(new NotImplementedError())
       def get(id: PaymentId): IO[Option[Payment]] = IO.pure(None)
       def recordVoid(orderId: OrderId): IO[Option[Payment]] = IO.pure(None)
+      def flagReconciliation(orderId: OrderId, reason: String): IO[Boolean] =
+        IO.pure(false)
+      def reconciliationReason(orderId: OrderId): IO[Option[String]] =
+        IO.pure(None)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)

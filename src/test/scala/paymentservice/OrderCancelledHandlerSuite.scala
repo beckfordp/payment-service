@@ -156,7 +156,11 @@ class OrderCancelledHandlerSuite extends CatsEffectSuite {
         dl
       )(f.orderId, Some(envelope(f.orderId)))
       status <- statusOf(f)
-    } yield assertEquals(status, Some(PaymentStatus.Captured))
+      reason <- f.store.reconciliationReason(f.orderId)
+    } yield {
+      assertEquals(status, Some(PaymentStatus.Captured))
+      assertEquals(reason, Some("void_after_capture"))
+    }
   }
 
   test("OrderCancelled for an unknown payment is skipped") {

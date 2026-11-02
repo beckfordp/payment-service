@@ -77,6 +77,9 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
     def recordCaptureFailure(o: OrderId, r: String) =
       underlying.recordCaptureFailure(o, r)
     def recordVoid(o: OrderId) = underlying.recordVoid(o)
+    def flagReconciliation(o: OrderId, r: String) =
+      underlying.flagReconciliation(o, r)
+    def reconciliationReason(o: OrderId) = underlying.reconciliationReason(o)
     def expireDueAuthorizations(l: Int) =
       underlying.expireDueAuthorizations(l)
   }
@@ -329,7 +332,7 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
   }
 
   test(
-    "DispatchConfirmed for an expired authorization is dead-lettered without a gateway call"
+    "DispatchConfirmed for an expired authorization flags reconciliation without a gateway call"
   ) {
     for {
       (store, _) <- PaymentStore.inMemoryWithOutbox[IO]
@@ -359,10 +362,12 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       routed <- dlq.get
       captured <- captures.get
       after <- store.findByOrderId(orderId)
+      reason <- store.reconciliationReason(orderId)
     } yield {
-      assertEquals(routed.map(_._1), List("fulfilment-events-dlq"))
+      assertEquals(routed, Nil)
       assertEquals(captured, Nil)
       assertEquals(after.map(_.status), Some(PaymentStatus.Authorized))
+      assertEquals(reason, Some("dispatch_after_authorization_expired"))
     }
   }
 
@@ -389,11 +394,39 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
       routed <- dlq.get
       captured <- captures.get
       after <- f.store.findByOrderId(f.orderId)
+      reason <- f.store.reconciliationReason(f.orderId)
     } yield {
       assertEquals(routed, Nil)
       assertEquals(captured, Nil)
       assertEquals(after.map(_.status), Some(PaymentStatus.Voided))
+      assertEquals(reason, Some("capture_after_void"))
     }
+  }
+
+  test("DispatchFailed after capture flags void_after_capture") {
+    for {
+      f <- fixture
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
+      dl <- deadLetter(dlq)
+      _ <- f.store
+        .recordCapture(f.orderId)
+        .map(_.getOrElse(fail("expected the capture")))
+      _ <- handle(f.store, f.methods, dl)(f.orderId, failed(f.orderId))
+      reason <- f.store.reconciliationReason(f.orderId)
+    } yield assertEquals(reason, Some("void_after_capture"))
+  }
+
+  test("DispatchConfirmed after capture failure flags capture_after_failed") {
+    for {
+      f <- fixture
+      dlq <- Ref.of[IO, List[(String, String, Option[String])]](Nil)
+      dl <- deadLetter(dlq)
+      _ <- f.store
+        .recordCaptureFailure(f.orderId, "capture_failed")
+        .map(_.getOrElse(fail("expected the capture failure")))
+      _ <- handle(f.store, f.methods, dl)(f.orderId, confirmed(f.orderId))
+      reason <- f.store.reconciliationReason(f.orderId)
+    } yield assertEquals(reason, Some("capture_after_failed"))
   }
 
   test("an event with a blank orderId is dead-lettered raw") {
