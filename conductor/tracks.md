@@ -4,9 +4,6 @@ This file tracks all major tracks for the project.
 
 ---
 
-- [x] **Track: ADM-5 — authorization expiry trigger**
-  *Link: [./tracks/expiry-trigger_20261102/](./tracks/expiry-trigger_20261102/)*
-
 ---
 
 ## Backlog
