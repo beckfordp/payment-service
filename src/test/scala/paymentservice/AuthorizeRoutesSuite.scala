@@ -136,7 +136,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = payments.create(o, a)
         def get(id: PaymentId) = payments.get(id)
         def recordVoid(o: OrderId) = payments.recordVoid(o)
-        def expireDueAuthorizations(l: Int) = payments.expireDueAuthorizations(l)
+        def expireDueAuthorizations(l: Int) =
+          payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = payments.delete(id)
         def ping = payments.ping
         def findByOrderId(o: OrderId) = payments.findByOrderId(o)
@@ -246,7 +247,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
-        def expireDueAuthorizations(l: Int) = f.payments.expireDueAuthorizations(l)
+        def expireDueAuthorizations(l: Int) =
+          f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: OrderId) = f.payments.findByOrderId(o)
@@ -443,7 +445,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
-        def expireDueAuthorizations(l: Int) = f.payments.expireDueAuthorizations(l)
+        def expireDueAuthorizations(l: Int) =
+          f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: OrderId) =
@@ -496,7 +499,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
-        def expireDueAuthorizations(l: Int) = f.payments.expireDueAuthorizations(l)
+        def expireDueAuthorizations(l: Int) =
+          f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: OrderId) = IO.pure(None)
@@ -547,7 +551,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
         def create(o: OrderId, a: Int) = f.payments.create(o, a)
         def get(id: PaymentId) = f.payments.get(id)
         def recordVoid(o: OrderId) = f.payments.recordVoid(o)
-        def expireDueAuthorizations(l: Int) = f.payments.expireDueAuthorizations(l)
+        def expireDueAuthorizations(l: Int) =
+          f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
         def ping = f.payments.ping
         def findByOrderId(o: OrderId) = f.payments.findByOrderId(o)
@@ -727,7 +732,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
       def recordCaptureFailure(o: OrderId, r: String) =
         f.payments.recordCaptureFailure(o, r)
       def recordVoid(o: OrderId) = f.payments.recordVoid(o)
-        def expireDueAuthorizations(l: Int) = f.payments.expireDueAuthorizations(l)
+      def expireDueAuthorizations(l: Int) =
+        f.payments.expireDueAuthorizations(l)
     }
     post(
       AuthorizeRoutes.routes[IO](store, f.methods, gateway, NoOpLogger[IO]),

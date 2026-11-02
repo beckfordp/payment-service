@@ -130,7 +130,7 @@ class OrderCancelledHandlerSuite extends CatsEffectSuite {
         gateway,
         NoOpLogger[IO],
         dl
-      )_
+      ) _
       _ <- handle(f.orderId, Some(envelope(f.orderId)))
       _ <- handle(f.orderId, Some(envelope(f.orderId)))
       status <- statusOf(f)

@@ -304,7 +304,12 @@ class PaymentStoreSuite extends CatsEffectSuite {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
       _ <- store
-        .recordAuthorization("order-1", 4999, paymentMethodId, expiredAuthorization)
+        .recordAuthorization(
+          "order-1",
+          4999,
+          paymentMethodId,
+          expiredAuthorization
+        )
         .map(_.getOrElse(fail("expected the authorization to be inserted")))
       expired <- store.expireDueAuthorizations(10)
       payment <- store.findByOrderId("order-1")
@@ -344,7 +349,12 @@ class PaymentStoreSuite extends CatsEffectSuite {
     for {
       (store, outbox) <- PaymentStore.inMemoryWithOutbox[IO]
       _ <- store
-        .recordAuthorization("order-1", 4999, paymentMethodId, expiredAuthorization)
+        .recordAuthorization(
+          "order-1",
+          4999,
+          paymentMethodId,
+          expiredAuthorization
+        )
         .map(_.getOrElse(fail("expected the authorization to be inserted")))
       first <- store.expireDueAuthorizations(10)
       second <- store.expireDueAuthorizations(10)
