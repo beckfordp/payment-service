@@ -1,0 +1,8 @@
+{
+  "track_id": "j7-payment-race_20261102",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-11-02T00:00:00Z",
+  "updated_at": "2026-11-02T00:00:00Z",
+  "description": "Checkout Journey 7: payment void/capture race classification, reconciliation and void-failure flag (US-21.2/21.4, US-9.6)"
+}
