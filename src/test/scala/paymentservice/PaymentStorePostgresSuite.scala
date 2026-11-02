@@ -737,6 +737,36 @@ class PaymentStorePostgresSuite
     }
   }
 
+  test(
+    "expireAuthorizationNow makes a live authorization due, only once it is authorized"
+  ) {
+    withContainers { postgres =>
+      val orderId = java.util.UUID.randomUUID().toString
+      val live = Authorization(
+        "auth_live",
+        java.time.Instant.now().plusSeconds(86400)
+      )
+      withStores(postgres) { (store, method) =>
+        for {
+          _ <- store
+            .recordAuthorization(orderId, 4999, method.id, live)
+            .map(_.getOrElse(fail("expected the authorization to be inserted")))
+          notDue <- store.expireDueAuthorizations(10)
+          pulled <- store.expireAuthorizationNow(orderId)
+          expired <- store.expireDueAuthorizations(10)
+          again <- store.expireAuthorizationNow(orderId)
+          unknown <- store.expireAuthorizationNow("no-such-order")
+        } yield {
+          assertEquals(notDue, Nil)
+          assertEquals(pulled.map(_.status), Some(PaymentStatus.Authorized))
+          assertEquals(expired.map(_.orderId), List(OrderId.trusted(orderId)))
+          assertEquals(again, None)
+          assertEquals(unknown, None)
+        }
+      }
+    }
+  }
+
   test("recordVoid returns None for a non-authorized payment, unchanged") {
     withContainers { postgres =>
       val orderId = java.util.UUID.randomUUID().toString

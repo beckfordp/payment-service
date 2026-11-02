@@ -37,7 +37,7 @@ object Main extends IOApp.Simple {
         telemetry.logger.warn(
           Map("operator_auth" -> "enabled")
         )(
-          "Dev operator token enabled - reconciliation resolve is local/demo only (ADR 0026)"
+          "Dev operator token enabled - reconciliation resolve and expiry trigger are local/demo only (ADR 0026)"
         )
       else IO.unit
     )
@@ -66,7 +66,8 @@ object Main extends IOApp.Simple {
       telemetry,
       AsyncApiChannels.channels,
       config.asyncApiHtmlDir,
-      OperatorAuth.fromConfig(config.operatorAuth)
+      OperatorAuth.fromConfig(config.operatorAuth),
+      config.expirySweep.batchSize
     )
     _ <- EmberServerBuilder
       .default[IO]

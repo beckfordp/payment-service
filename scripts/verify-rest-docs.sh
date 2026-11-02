@@ -91,6 +91,7 @@ allowed = {
     ("/health/ready", "get"): {"200", "503"},
     ("/reconciliations", "get"): {"200", "400"},
     ("/reconciliations/{orderId}", "patch"): {"200", "400", "401", "404"},
+    ("/payments/authorizations/{orderId}/expire", "post"): {"200", "400", "401", "404", "409"},
 }
 for (path, method), statuses in allowed.items():
     op = paths.get(path, {}).get(method)

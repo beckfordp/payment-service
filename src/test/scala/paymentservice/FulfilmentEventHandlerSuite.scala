@@ -99,6 +99,8 @@ class FulfilmentEventHandlerSuite extends CatsEffectSuite {
         resolvedAt: java.time.Instant
     ): IO[ResolveReconciliationOutcome] =
       underlying.resolveReconciliation(orderId, operatorId, note, resolvedAt)
+    def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+      IO.pure(None)
     def expireDueAuthorizations(l: Int) =
       underlying.expireDueAuthorizations(l)
   }

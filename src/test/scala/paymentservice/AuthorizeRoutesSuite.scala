@@ -154,6 +154,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
             resolvedAt: java.time.Instant
         ): IO[ResolveReconciliationOutcome] =
           IO.pure(ResolveReconciliationOutcome.NotFound)
+        def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = payments.delete(id)
@@ -280,6 +282,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
             resolvedAt: java.time.Instant
         ): IO[ResolveReconciliationOutcome] =
           IO.pure(ResolveReconciliationOutcome.NotFound)
+        def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -493,6 +497,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
             resolvedAt: java.time.Instant
         ): IO[ResolveReconciliationOutcome] =
           IO.pure(ResolveReconciliationOutcome.NotFound)
+        def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -562,6 +568,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
             resolvedAt: java.time.Instant
         ): IO[ResolveReconciliationOutcome] =
           IO.pure(ResolveReconciliationOutcome.NotFound)
+        def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -629,6 +637,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
             resolvedAt: java.time.Instant
         ): IO[ResolveReconciliationOutcome] =
           IO.pure(ResolveReconciliationOutcome.NotFound)
+        def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+          IO.pure(None)
         def expireDueAuthorizations(l: Int) =
           f.payments.expireDueAuthorizations(l)
         def delete(id: PaymentId) = f.payments.delete(id)
@@ -825,6 +835,8 @@ class AuthorizeRoutesSuite extends CatsEffectSuite {
           resolvedAt: java.time.Instant
       ): IO[ResolveReconciliationOutcome] =
         IO.pure(ResolveReconciliationOutcome.NotFound)
+      def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+        IO.pure(None)
       def expireDueAuthorizations(l: Int) =
         f.payments.expireDueAuthorizations(l)
     }

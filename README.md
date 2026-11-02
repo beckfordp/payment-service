@@ -56,6 +56,10 @@ curl -X PATCH http://localhost:8080/reconciliations/<orderId> \
   -H "Content-Type: application/json" \
   -d '{"status":"resolved","note":"checked"}'
 
+# Expire one authorization now (ADM-5, dev/demo); runs one sweep tick
+curl -X POST http://localhost:8080/payments/authorizations/<orderId>/expire \
+  -H "Authorization: Bearer dev-operator-token"
+
 # Liveness / readiness
 curl http://localhost:8080/health
 curl http://localhost:8080/health/ready

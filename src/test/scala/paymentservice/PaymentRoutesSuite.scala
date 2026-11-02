@@ -56,6 +56,8 @@ class PaymentRoutesSuite extends CatsEffectSuite {
           resolvedAt: java.time.Instant
       ): IO[ResolveReconciliationOutcome] =
         IO.pure(ResolveReconciliationOutcome.NotFound)
+      def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+        IO.pure(None)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] =
         IO.raiseError(error)
       def delete(id: PaymentId): IO[Boolean] = IO.raiseError(error)

@@ -41,6 +41,8 @@ class HealthRoutesSuite extends CatsEffectSuite {
           resolvedAt: java.time.Instant
       ): IO[ResolveReconciliationOutcome] =
         IO.pure(ResolveReconciliationOutcome.NotFound)
+      def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+        IO.pure(None)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(true)
@@ -90,6 +92,8 @@ class HealthRoutesSuite extends CatsEffectSuite {
           resolvedAt: java.time.Instant
       ): IO[ResolveReconciliationOutcome] =
         IO.pure(ResolveReconciliationOutcome.NotFound)
+      def expireAuthorizationNow(o: OrderId): IO[Option[Payment]] =
+        IO.pure(None)
       def expireDueAuthorizations(limit: Int): IO[List[Payment]] = IO.pure(Nil)
       def delete(id: PaymentId): IO[Boolean] = IO.pure(false)
       def ping: IO[Boolean] = IO.pure(false)

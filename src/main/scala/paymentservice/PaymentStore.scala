@@ -113,6 +113,12 @@ trait PaymentStore[F[_]] {
     */
   def expireDueAuthorizations(limit: Int): F[List[Payment]]
 
+  /** ADM-5: pulls a live `Authorized` payment's `expires_at` forward to now, so
+    * the next sweep tick expires it through the normal US-20.1 path. `None`
+    * when the order has no authorized payment; nothing is written.
+    */
+  def expireAuthorizationNow(orderId: OrderId): F[Option[Payment]]
+
   /** Records a manual-reconciliation flag for an order (US-21.4), first-wins.
     * Returns false for an unknown order.
     */
@@ -441,6 +447,21 @@ object PaymentStore {
             }
           } yield due
 
+        def expireAuthorizationNow(orderId: OrderId): F[Option[Payment]] =
+          Sync[F].realTimeInstant.flatMap { now =>
+            ref.modify { entities =>
+              entities.values.find(payment =>
+                payment.orderId == orderId &&
+                  payment.status == PaymentStatus.Authorized
+              ) match {
+                case Some(payment) =>
+                  val updated = payment.copy(expiresAt = Some(now))
+                  (entities + (payment.id -> updated), Some(updated))
+                case None => (entities, None)
+              }
+            }
+          }
+
         def flagReconciliation(
             orderId: OrderId,
             reason: String
@@ -681,6 +702,16 @@ object PaymentStore {
       RETURNING p.id, p.order_id, p.amount_cents, p.status, p.created_at,
                 p.updated_at, p.payment_method_id, p.auth_id, p.expires_at,
                 p.decline_reason
+    """.query(paymentWithIdRow)
+
+  private val expireAuthorizationNowQuery
+      : skunk.Query[(OrderId, PaymentStatus), (UUID, PaymentRow)] =
+    sql"""
+      UPDATE "payment"
+      SET expires_at = now()
+      WHERE order_id = $orderId AND status = $paymentStatus
+      RETURNING id, order_id, amount_cents, status, created_at, updated_at,
+                payment_method_id, auth_id, expires_at, decline_reason
     """.query(paymentWithIdRow)
 
   private val deletePayment: skunk.Query[UUID, UUID] =
@@ -971,6 +1002,21 @@ object PaymentStore {
                         session
                           .prepare(selectPaymentByOrderId)
                           .flatMap(_.option(orderId))
+                      }
+                    }.map(_.map { case (id, row) =>
+                      toPayment(PaymentId.fromUuid(id), row)
+                    })
+
+                  def expireAuthorizationNow(
+                      orderId: OrderId
+                  ): F[Option[Payment]] =
+                    timed("update") {
+                      pool.use { session =>
+                        session
+                          .prepare(expireAuthorizationNowQuery)
+                          .flatMap(
+                            _.option((orderId, PaymentStatus.Authorized))
+                          )
                       }
                     }.map(_.map { case (id, row) =>
                       toPayment(PaymentId.fromUuid(id), row)

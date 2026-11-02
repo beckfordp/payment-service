@@ -28,7 +28,8 @@ object AppRoutes {
       telemetry: Telemetry[F],
       channels: List[AsyncApiChannel[?]],
       staticAsyncApiDocsDir: String,
-      operatorAuth: OperatorAuth = OperatorAuth.disabled
+      operatorAuth: OperatorAuth = OperatorAuth.disabled,
+      sweepBatchSize: Int = 100
   ): HttpRoutes[F] = {
     val docsRoutes = Docs.routes[F](
       "Payment Service",
@@ -54,6 +55,12 @@ object AppRoutes {
           store,
           operatorAuth,
           telemetry.logger
+        ),
+        ExpiryTriggerRoutes.expireServerEndpoint[F](
+          store,
+          operatorAuth,
+          telemetry.logger,
+          sweepBatchSize
         ),
         HealthRoutes.healthServerEndpoint[F],
         HealthRoutes.readyServerEndpoint[F](store)

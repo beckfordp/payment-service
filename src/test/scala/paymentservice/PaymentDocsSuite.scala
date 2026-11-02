@@ -142,6 +142,12 @@ class PaymentDocsSuite extends CatsEffectSuite {
         OperatorAuth.disabled,
         logger
       ),
+      ExpiryTriggerRoutes.expireServerEndpoint[IO](
+        store,
+        OperatorAuth.disabled,
+        logger,
+        100
+      ),
       HealthRoutes.healthServerEndpoint[IO],
       HealthRoutes.readyServerEndpoint[IO](store)
     )
@@ -161,6 +167,7 @@ class PaymentDocsSuite extends CatsEffectSuite {
         List(400, 402, 404, 409, 500), // POST /payments/authorize
         List(400), // GET /reconciliations
         List(400, 401, 404), // PATCH /reconciliations/{orderId}
+        List(401, 404, 409), // POST /payments/authorizations/{orderId}/expire
         Nil, // GET /health
         List(503) // GET /health/ready
       )

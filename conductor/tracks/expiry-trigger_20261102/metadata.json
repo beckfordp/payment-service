@@ -1,0 +1,8 @@
+{
+  "track_id": "expiry-trigger_20261102",
+  "type": "feature",
+  "status": "completed",
+  "created_at": "2026-11-02T17:05:00Z",
+  "updated_at": "2026-11-02T17:05:00Z",
+  "description": "ADM-5: dev/admin trigger to expire one authorization now"
+}
