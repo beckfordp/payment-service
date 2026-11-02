@@ -2,9 +2,6 @@
 
 This file tracks all major tracks for the project.
 
-- [x] **Track: ADM-4 — reconciliation workflow**
-  *Link: [./tracks/reconciliation-workflow_20261102/](./tracks/reconciliation-workflow_20261102/)*
-
 ---
 
 ---
