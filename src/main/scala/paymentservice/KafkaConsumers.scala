@@ -7,7 +7,7 @@ import fs2.Stream
 import fs2.kafka.ProducerSettings
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Meter
-import purekafka.consumer.{DeadLetter, StreamSupervisor}
+import purekafka.consumer.{DeadLetter, EventAge, StreamSupervisor}
 
 /** Supervises the `fulfilment-events` and `order-events` consumers
   * independently, each with its own DLQ. The first handles `DispatchFailed`
@@ -29,6 +29,7 @@ object KafkaConsumers {
         .withBootstrapServers(config.bootstrapServers)
 
     for {
+      eventAge <- Stream.eval(EventAge.create[F](meter))
       fulfilmentDeadLetter <- Stream.resource(
         DeadLetter.resource[F, String, Option[String]](
           config.dlqRetry,
@@ -52,7 +53,8 @@ object KafkaConsumers {
               methods,
               gateway,
               logger,
-              fulfilmentDeadLetter
+              fulfilmentDeadLetter,
+              eventAge
             )
           )
         )
@@ -66,7 +68,8 @@ object KafkaConsumers {
                 store,
                 gateway,
                 logger,
-                orderDeadLetter
+                orderDeadLetter,
+                eventAge
               )
             )
           )

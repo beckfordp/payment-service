@@ -15,7 +15,7 @@ import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
-import purekafka.consumer.DeadLetter
+import purekafka.consumer.{DeadLetter, EventAge}
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.{description, encodedExample}
 
@@ -107,6 +107,8 @@ object FulfilmentEventConsumer {
 
   val topic: String = "fulfilment-events"
 
+  val groupId: String = "payment-service-fulfilment-events"
+
   private val captureFailedReason = "capture_failed"
 
   private def consumerSettings[F[_]: Async](
@@ -114,7 +116,7 @@ object FulfilmentEventConsumer {
   ): ConsumerSettings[F, Option[String], Option[String]] =
     ConsumerSettings[F, Option[String], Option[String]]
       .withBootstrapServers(config.bootstrapServers)
-      .withGroupId("payment-service-fulfilment-events")
+      .withGroupId(groupId)
       .withAutoOffsetReset(AutoOffsetReset.Earliest)
 
   def run[F[_]: Async](
@@ -123,12 +125,18 @@ object FulfilmentEventConsumer {
       methods: PaymentMethodStore[F],
       gateway: PaymentGatewayClient[F],
       logger: StructuredLogger[F],
-      deadLetter: DeadLetter[F, String, Option[String]]
+      deadLetter: DeadLetter[F, String, Option[String]],
+      eventAge: EventAge[F]
   ): Stream[F, Unit] =
     KafkaConsumer
       .stream(consumerSettings[F](config))
       .subscribeTo(topic)
       .records
+      .evalTap(committable =>
+        committable.record.timestamp.createTime.traverse_(
+          eventAge.record(topic, groupId, _)
+        )
+      )
       .evalMap { committable =>
         handle(store, methods, gateway, logger, deadLetter)(
           committable.record.key.getOrElse(""),

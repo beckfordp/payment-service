@@ -10,7 +10,7 @@ import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
 import paymentservice.domain.{OrderId, PaymentRace, PaymentStatus}
-import purekafka.consumer.DeadLetter
+import purekafka.consumer.{DeadLetter, EventAge}
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.{description, encodedExample}
 
@@ -56,12 +56,14 @@ object OrderCancelledConsumer {
 
   val topic: String = "order-events"
 
+  val groupId: String = "payment-service-order-events"
+
   private def consumerSettings[F[_]: Async](
       config: KafkaConfig
   ): ConsumerSettings[F, Option[String], Option[String]] =
     ConsumerSettings[F, Option[String], Option[String]]
       .withBootstrapServers(config.bootstrapServers)
-      .withGroupId("payment-service-order-events")
+      .withGroupId(groupId)
       .withAutoOffsetReset(AutoOffsetReset.Earliest)
 
   private def handleCancelled[F[_]: MonadThrow](
@@ -197,12 +199,18 @@ object OrderCancelledConsumer {
       store: PaymentStore[F],
       gateway: PaymentGatewayClient[F],
       logger: StructuredLogger[F],
-      deadLetter: DeadLetter[F, String, Option[String]]
+      deadLetter: DeadLetter[F, String, Option[String]],
+      eventAge: EventAge[F]
   ): Stream[F, Unit] =
     KafkaConsumer
       .stream(consumerSettings[F](config))
       .subscribeTo(topic)
       .records
+      .evalTap(committable =>
+        committable.record.timestamp.createTime.traverse_(
+          eventAge.record(topic, groupId, _)
+        )
+      )
       .evalMap { committable =>
         handle(store, gateway, logger, deadLetter)(
           committable.record.key.getOrElse(""),

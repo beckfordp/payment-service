@@ -6,6 +6,7 @@ import cats.syntax.all._
 import fs2.io.net.Network
 import paymentservice.domain.PaymentMethodId
 import org.typelevel.otel4s.metrics.Meter
+import purerest.metrics.PoolMetrics
 import skunk.{Codec, Session}
 import skunk.circe.codec.all.jsonb
 import skunk.codec.all._
@@ -120,6 +121,7 @@ object PaymentMethodStore {
       .withUserAndPassword(config.user, config.password)
       .withDatabase(config.database)
       .pooled(max = 5)
+      .evalMap(PoolMetrics.instrument(meter, "payment-method")(_))
       .evalMap { pool =>
         DbTimer.create(meter).map { timer =>
           new PaymentMethodStore[F] {

@@ -16,7 +16,7 @@ import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.log4cats.testing.StructuredTestingLogger
 import org.typelevel.log4cats.testing.StructuredTestingLogger.WARN
 import org.typelevel.otel4s.metrics.Meter
-import purekafka.consumer.DeadLetter
+import purekafka.consumer.{DeadLetter, EventAge}
 import purekafka.resilience.{
   CircuitBreakerConfig,
   ResilienceConfig,
@@ -30,6 +30,8 @@ import scala.concurrent.duration._
 class FulfilmentEventConsumerSuite
     extends CatsEffectSuite
     with TestContainerForAll {
+
+  private val noEventAge: EventAge[IO] = (_, _, _) => IO.unit
 
   override val containerDef: KafkaContainer.Def = KafkaContainer.Def()
 
@@ -115,7 +117,7 @@ class FulfilmentEventConsumerSuite
       logger: StructuredLogger[IO] = NoOpLogger[IO]
   ): IO[Unit] =
     FulfilmentEventConsumer
-      .run[IO](config, store, methods, gateway, logger, deadLetter)
+      .run[IO](config, store, methods, gateway, logger, deadLetter, noEventAge)
       .compile
       .drain
 

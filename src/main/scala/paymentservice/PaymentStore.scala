@@ -19,6 +19,7 @@ import fs2.io.net.Network
 import io.circe.syntax._
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.Meter
+import purerest.metrics.PoolMetrics
 import skunk.{Codec, Session}
 import skunk.circe.codec.all.jsonb
 import skunk.codec.all._
@@ -867,6 +868,7 @@ object PaymentStore {
       .withUserAndPassword(config.user, config.password)
       .withDatabase(config.database)
       .pooled(max = 10)
+      .evalMap(PoolMetrics.instrument(meter, "payment")(_))
       .evalMap { pool =>
         DbTimer
           .create(meter)
