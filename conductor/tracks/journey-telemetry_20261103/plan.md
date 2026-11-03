@@ -13,6 +13,7 @@
 - [ ] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: Deploy + live verification
+- [x] Task: Bump purerest 0.8.2 — JFR runtime telemetry off (gluon TD-28) 6a04838
 - [ ] Task: Build/deploy to gluon-local; `scripts/verify-journey-telemetry.sh` greps the
       metrics port for the new series after real traffic
 - [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
