@@ -23,7 +23,11 @@ object Main extends IOApp.Simple {
       )
     )
     _ <- Resource.eval(Migrations.run[IO](config.postgres))
-    telemetry <- Telemetry.resource[IO](config.serviceName, config.metricsPort)
+    telemetry <- Telemetry.resource[IO](
+      config.serviceName,
+      config.metricsPort,
+      Some(runtime.metrics)
+    )
     _ <- Resource.eval(
       telemetry.logger.info(
         Map(
@@ -41,7 +45,21 @@ object Main extends IOApp.Simple {
         )
       else IO.unit
     )
-    store <- PaymentStore.postgres[IO](config.postgres, telemetry.meter)
+    store <- PaymentStore
+      .postgres[IO](config.postgres, telemetry.meter)
+      .evalMap(
+        PaymentJourneyMetrics.instrument[IO](
+          _,
+          telemetry.meter,
+          telemetry.logger
+        )
+      )
+    uncaptured <- UncapturedAuthorizationGauges.postgresQuery[IO](
+      config.postgres
+    )
+    _ <- UncapturedAuthorizationGauges.register[IO](telemetry.meter)(
+      uncaptured
+    )
     _ <- ExpirySweep.resource[IO](
       config.expirySweep,
       store,

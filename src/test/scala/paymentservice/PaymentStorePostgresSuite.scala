@@ -44,6 +44,43 @@ class PaymentStorePostgresSuite
       password = postgres.password
     )
 
+  test("uncaptured query counts authorized payments and their oldest time") {
+    withContainers { postgres =>
+      withStores(postgres) { (store, method) =>
+        UncapturedAuthorizationGauges
+          .postgresQuery[IO](configFor(postgres))
+          .use { query =>
+            for {
+              before <- query
+              a <- store.recordAuthorization(
+                "order-unc-1",
+                100,
+                method.id,
+                authorization
+              )
+              _ <- store.recordAuthorization(
+                "order-unc-2",
+                100,
+                method.id,
+                authorization
+              )
+              _ <- store.recordCapture("order-unc-2")
+              after <- query
+            } yield {
+              // The container is shared across tests: assert the delta.
+              assertEquals(after.count - before.count, 1L)
+              assert(
+                after.oldestAuthorizedAt.exists(oldest =>
+                  a.exists(p => !oldest.isAfter(p.updatedAt))
+                ),
+                s"after: $after, authorized: $a"
+              )
+            }
+          }
+      }
+    }
+  }
+
   test("create persists an entity and returns it with a generated id") {
     withContainers { postgres =>
       val config = configFor(postgres)
