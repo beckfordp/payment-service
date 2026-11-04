@@ -1,6 +1,7 @@
 package paymentservice
 
-import cats.effect.{Async, Clock, Resource, Sync}
+import cats.Monad
+import cats.effect.{Async, Clock, Resource}
 import cats.effect.std.Console
 import cats.syntax.all._
 import fs2.io.net.Network
@@ -27,7 +28,7 @@ import java.time.Instant
   */
 object PaymentJourneyMetrics {
 
-  def instrument[F[_]: Sync](
+  def instrument[F[_]: Monad](
       store: PaymentStore[F],
       meter: Meter[F],
       logger: StructuredLogger[F]
@@ -150,7 +151,7 @@ final case class UncapturedAuthorizations(
   */
 object UncapturedAuthorizationGauges {
 
-  def register[F[_]: Sync](meter: Meter[F])(
+  def register[F[_]: Monad: Clock](meter: Meter[F])(
       query: F[UncapturedAuthorizations]
   ): Resource[F, Unit] =
     meter
@@ -172,7 +173,7 @@ object UncapturedAuthorizationGauges {
       )
       .void
 
-  /** The in-memory store's view, for tests and the in-memory wiring. */
+  /** The same view over in-memory payments, for tests. */
   def fromPayments(payments: List[Payment]): UncapturedAuthorizations = {
     val authorized = payments.filter(_.status == PaymentStatus.Authorized)
     UncapturedAuthorizations(
