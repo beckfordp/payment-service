@@ -22,7 +22,7 @@ val testcontainersScalaVersion = "0.43.6"
 val purekafkaVersion = "0.8.2"
 // Pinned to match the purerestlib version this service is built against — see
 // README's "Consuming purerest as a dependency" section.
-val purerestlibVersion = "0.8.2"
+val purerestlibVersion = "0.10.0"
 
 // Skunk 1.0.0 depends on otel4s-core/-core-common/-core-metrics 0.16.0 (its own
 // optional tracing integration), which conflicts with purerestlib's otel4s 1.1.0
