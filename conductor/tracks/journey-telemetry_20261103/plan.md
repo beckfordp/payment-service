@@ -17,3 +17,6 @@
 - [x] Task: Build/deploy to gluon-local; `scripts/verify-journey-telemetry.sh` greps the
       metrics port for the new series after real traffic 4fd0af8
 - [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions fc51c9b
