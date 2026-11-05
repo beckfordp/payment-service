@@ -20,7 +20,9 @@ import munit.CatsEffectSuite
 import java.util.UUID
 import org.testcontainers.utility.DockerImageName
 import org.typelevel.otel4s.metrics.Meter
+import org.typelevel.otel4s.trace.Tracer
 import purerest.metrics.{LatencyBuckets, Metrics}
+import purerest.tracing.Tracing
 
 import java.sql.DriverManager
 import java.time.Instant
@@ -85,7 +87,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           store.createOrFail("order-create", 4999).map { entity =>
             assert(PaymentId.render(entity.id).nonEmpty)
@@ -99,7 +101,7 @@ class PaymentStorePostgresSuite
       val config = configFor(postgres)
       Migrations
         .run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           for {
             first <- store.createOrFail("order-1", 4999)
@@ -113,7 +115,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           for {
             created <- store.createOrFail(
@@ -130,7 +132,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           store
             .get(PaymentId.fromUuid(UUID.randomUUID()))
@@ -176,7 +178,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           for {
             created <- store.createOrFail(
@@ -197,7 +199,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           store
             .delete(PaymentId.fromUuid(UUID.randomUUID()))
@@ -210,7 +212,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           store.ping.map(assert(_))
         }
@@ -221,7 +223,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val unreachableConfig = configFor(postgres).copy(port = 1)
       PaymentStore
-        .postgres[IO](unreachableConfig, Meter.noop[IO])
+        .postgres[IO](unreachableConfig, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           store.ping.map(ready => assert(!ready))
         }
@@ -235,7 +237,7 @@ class PaymentStorePostgresSuite
       val config = configFor(postgres)
       Metrics.test[IO]("payment-store-postgres-metrics-test").use { testMeter =>
         Migrations.run[IO](config) *> PaymentStore
-          .postgres[IO](config, testMeter.meter)
+          .postgres[IO](config, testMeter.meter, Tracer.noop[IO])
           .use { store =>
             for {
               created <- store.createOrFail(
@@ -286,7 +288,7 @@ class PaymentStorePostgresSuite
       val unreachableConfig = configFor(postgres).copy(port = 1)
       Metrics.test[IO]("payment-store-postgres-metrics-test").use { testMeter =>
         PaymentStore
-          .postgres[IO](unreachableConfig, testMeter.meter)
+          .postgres[IO](unreachableConfig, testMeter.meter, Tracer.noop[IO])
           .use { store =>
             for {
               result <- store
@@ -329,7 +331,7 @@ class PaymentStorePostgresSuite
     withContainers { postgres =>
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           for {
             ready <- store.ping
@@ -354,12 +356,15 @@ class PaymentStorePostgresSuite
   private val authorization =
     Authorization("auth_pg", Instant.parse("2099-11-03T12:00:00Z"))
 
-  private def withStores[A](postgres: PostgreSQLContainer)(
+  private def withStores[A](
+      postgres: PostgreSQLContainer,
+      tracer: Tracer[IO] = Tracer.noop[IO]
+  )(
       f: (PaymentStore[IO], PaymentMethod) => IO[A]
   ): IO[A] = {
     val config = configFor(postgres)
     Migrations.run[IO](config) *> (
-      PaymentStore.postgres[IO](config, Meter.noop[IO]),
+      PaymentStore.postgres[IO](config, Meter.noop[IO], tracer),
       PaymentMethodStore.postgres[IO](config, Meter.noop[IO])
     ).tupled.use { case (store, methods) =>
       methods
@@ -485,7 +490,7 @@ class PaymentStorePostgresSuite
       withContainers { postgres =>
         val config = configFor(postgres)
         Migrations.run[IO](config) *> PaymentStore
-          .postgres[IO](config, Meter.noop[IO])
+          .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
           .use { store =>
             val orderId =
               OrderId.parse("resolve-order").getOrElse(fail("bad id"))
@@ -809,7 +814,7 @@ class PaymentStorePostgresSuite
       val orderId = java.util.UUID.randomUUID().toString
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           for {
             created <- store.createOrFail(orderId, 4999)
@@ -828,7 +833,7 @@ class PaymentStorePostgresSuite
       val orderId = java.util.UUID.randomUUID().toString
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           for {
             _ <- store.createOrFail(orderId, 4999)
@@ -935,7 +940,7 @@ class PaymentStorePostgresSuite
       val orderId = java.util.UUID.randomUUID().toString
       val config = configFor(postgres)
       Migrations.run[IO](config) *> PaymentStore
-        .postgres[IO](config, Meter.noop[IO])
+        .postgres[IO](config, Meter.noop[IO], Tracer.noop[IO])
         .use { store =>
           for {
             _ <- store.createOrFail(orderId, 4999)
@@ -961,6 +966,62 @@ class PaymentStorePostgresSuite
         } yield {
           assertEquals(result, None)
           assertEquals(after.map(_.status), Some(PaymentStatus.Authorized))
+        }
+      }
+    }
+  }
+
+  test(
+    "PERF-5.4: PaymentAuthorized's outbox row carries the span's traceparent; outside a span, NULL"
+  ) {
+    withContainers { postgres =>
+      val inSpan = java.util.UUID.randomUUID().toString
+      val outside = java.util.UUID.randomUUID().toString
+      def traceParents(orderId: String) =
+        IO.blocking {
+          val conn = DriverManager.getConnection(
+            postgres.jdbcUrl,
+            postgres.username,
+            postgres.password
+          )
+          try {
+            val rs = conn
+              .createStatement()
+              .executeQuery(
+                s"select trace_parent from outbox_events where aggregate_id = '$orderId'"
+              )
+            Iterator
+              .unfold(())(_ =>
+                if (rs.next()) Some((Option(rs.getString(1)), ())) else None
+              )
+              .toList
+          } finally conn.close()
+        }
+      Tracing.test[IO]("outbox-traceparent").use { testTracer =>
+        withStores(postgres, testTracer.tracer) { (store, method) =>
+          for {
+            traceId <- testTracer.tracer.span("authorize").use { span =>
+              store
+                .recordAuthorization(inSpan, 4999, method.id, authorization)
+                .as(span.context.traceIdHex)
+            }
+            _ <- store.recordAuthorization(
+              outside,
+              4999,
+              method.id,
+              authorization
+            )
+            inSpanRows <- traceParents(inSpan)
+            outsideRows <- traceParents(outside)
+          } yield {
+            assertEquals(inSpanRows.size, 1)
+            assert(
+              inSpanRows.head
+                .exists(_.matches(s"00-$traceId-[0-9a-f]{16}-[0-9a-f]{2}")),
+              s"expected 00-$traceId-<span>-<flags>, got: $inSpanRows"
+            )
+            assertEquals(outsideRows, List(None))
+          }
         }
       }
     }
