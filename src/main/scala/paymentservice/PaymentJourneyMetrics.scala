@@ -40,7 +40,7 @@ object PaymentJourneyMetrics {
       meter.counter[Long]("payments.authorizations.expired").create
     ).mapN { (authorize, capture, voided, expired) =>
       def milestone(name: String, orderId: OrderId): F[Unit] =
-        Milestones.log(logger)(name, OrderId.render(orderId), None)
+        Milestones.log(logger)(name, OrderId.render(orderId))
 
       new PaymentStore[F] {
         export store.{
