@@ -9,8 +9,10 @@ import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.parser.decode
 import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.otel4s.trace.Tracer
 import paymentservice.domain.{OrderId, PaymentRace, PaymentStatus}
 import purekafka.consumer.{DeadLetter, EventAge}
+import purekafka.tracing.KafkaTracing
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.{description, encodedExample}
 
@@ -200,7 +202,8 @@ object OrderCancelledConsumer {
       gateway: PaymentGatewayClient[F],
       logger: StructuredLogger[F],
       deadLetter: DeadLetter[F, String, Option[String]],
-      eventAge: EventAge[F]
+      eventAge: EventAge[F],
+      tracer: Tracer[F]
   ): Stream[F, Unit] =
     KafkaConsumer
       .stream(consumerSettings[F](config))
@@ -212,9 +215,15 @@ object OrderCancelledConsumer {
         )
       )
       .evalMap { committable =>
-        handle(store, gateway, logger, deadLetter)(
-          committable.record.key.getOrElse(""),
-          committable.record.value
+        KafkaTracing.traced(tracer)(
+          committable.record.headers,
+          s"$topic process",
+          topic
+        )(
+          handle(store, gateway, logger, deadLetter)(
+            committable.record.key.getOrElse(""),
+            committable.record.value
+          )
         ) *> committable.offset.commit
       }
 }

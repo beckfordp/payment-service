@@ -75,7 +75,8 @@ object Main extends IOApp.Simple {
       methods,
       gateway,
       telemetry.logger,
-      telemetry.meter
+      telemetry.meter,
+      telemetry.tracer
     )
     routes = AppRoutes.all[IO](
       store,

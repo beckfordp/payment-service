@@ -16,12 +16,14 @@ import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.log4cats.testing.StructuredTestingLogger
 import org.typelevel.log4cats.testing.StructuredTestingLogger.WARN
 import org.typelevel.otel4s.metrics.Meter
+import org.typelevel.otel4s.trace.Tracer
 import purekafka.consumer.{DeadLetter, EventAge}
 import purekafka.resilience.{
   CircuitBreakerConfig,
   ResilienceConfig,
   RetryConfig
 }
+import purerest.tracing.Tracing
 
 import java.time.Instant
 import java.util.UUID
@@ -54,7 +56,8 @@ class FulfilmentEventConsumerSuite
   private def produce(
       config: KafkaConfig,
       key: String,
-      json: String
+      json: String,
+      headers: Headers = Headers.empty
   ): IO[Unit] = {
     val producerSettings =
       ProducerSettings[IO, String, String]
@@ -64,6 +67,7 @@ class FulfilmentEventConsumerSuite
       .use(
         _.produceOne_(
           ProducerRecord(FulfilmentEventConsumer.topic, key, json)
+            .withHeaders(headers)
         ).flatten.void
       )
   }
@@ -114,10 +118,20 @@ class FulfilmentEventConsumerSuite
       methods: PaymentMethodStore[IO],
       gateway: PaymentGatewayClient[IO],
       deadLetter: DeadLetter[IO, String, Option[String]],
-      logger: StructuredLogger[IO] = NoOpLogger[IO]
+      logger: StructuredLogger[IO] = NoOpLogger[IO],
+      tracer: Tracer[IO] = Tracer.noop[IO]
   ): IO[Unit] =
     FulfilmentEventConsumer
-      .run[IO](config, store, methods, gateway, logger, deadLetter, noEventAge)
+      .run[IO](
+        config,
+        store,
+        methods,
+        gateway,
+        logger,
+        deadLetter,
+        noEventAge,
+        tracer
+      )
       .compile
       .drain
 
@@ -393,6 +407,58 @@ class FulfilmentEventConsumerSuite
         assertEquals(found.map(_.status), Some(PaymentStatus.Pending))
         assertEquals(captures, Nil)
         assertEquals(events, Nil)
+      }
+    }
+  }
+
+  test(
+    "PERF-5.5: a record's traceparent header becomes the parent of its fulfilment-events process span"
+  ) {
+    withContainers { kafka =>
+      val config = configFor(kafka)
+      val traceId = "4bf92f3577b34da6a3ce929d0e0e4736"
+      val parentSpanId = "00f067aa0ba902b7"
+      def consumedSpans(tracer: Tracing.TestTracer[IO]) =
+        tracer.finishedSpans.map(
+          _.filter(s =>
+            s.getName == "fulfilment-events process" && s.getTraceId == traceId
+          )
+        )
+      Tracing.test[IO]("payment-consumer-tracing").use { testTracer =>
+        for {
+          store <- PaymentStore.inMemory[IO]
+          methods <- PaymentMethodStore.inMemory[IO]
+          deadLetter <- noOpDeadLetter
+          spy <- spy()
+          _ <- produce(
+            config,
+            "order-traced",
+            envelopeJson(
+              "PaymentAuthorized",
+              Json.obj("orderId" -> Json.fromString("order-traced"))
+            ),
+            Headers(Header("traceparent", s"00-$traceId-$parentSpanId-01"))
+          )
+          spans <- runConsumer(
+            config,
+            store,
+            methods,
+            spy.client,
+            deadLetter,
+            tracer = testTracer.tracer
+          ).background.use(_ =>
+            (IO.sleep(200.millis) *> consumedSpans(testTracer))
+              .iterateUntil(_.nonEmpty)
+              .timeout(30.seconds)
+          )
+        } yield {
+          val span = spans.head
+          assertEquals(
+            span.getKind,
+            io.opentelemetry.api.trace.SpanKind.CONSUMER
+          )
+          assertEquals(span.getParentSpanContext.getSpanId, parentSpanId)
+        }
       }
     }
   }
