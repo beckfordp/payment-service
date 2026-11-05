@@ -733,18 +733,30 @@ object PaymentStore {
       VALUES ($uuid, $text, ${jsonb[EventEnvelope]}, $text, ${text.opt})
     """.command
 
-  /** Writes one outbox row in `session`'s transaction, stamped with the active
-    * trace context (`KafkaTracing.traceParent`).
+  /** Writes one outbox row in `session`'s transaction inside an `outbox.write`
+    * span (PERF-5.9), stamped with that span's trace context
+    * (`KafkaTracing.traceParent`) so consumers become its children.
     */
   private def insertOutbox[F[_]: FlatMap](
       tracer: Tracer[F],
       session: Session[F],
       row: (UUID, String, EventEnvelope, String)
   ): F[Unit] =
-    KafkaTracing
-      .traceParent(tracer)
-      .flatMap(tp =>
-        session.prepare(insertOutboxEvent).flatMap(_.execute(row :* tp)).void
+    tracer
+      .span(
+        "outbox.write",
+        Attribute("outbox.event_type", row._3.eventType),
+        Attribute("outbox.aggregate_id", row._2)
+      )
+      .surround(
+        KafkaTracing
+          .traceParent(tracer)
+          .flatMap(tp =>
+            session
+              .prepare(insertOutboxEvent)
+              .flatMap(_.execute(row :* tp))
+              .void
+          )
       )
 
   private val pingQuery: skunk.Query[skunk.Void, Int] = sql"SELECT 1".query(

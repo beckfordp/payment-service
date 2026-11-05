@@ -54,6 +54,7 @@ object Main extends IOApp.Simple {
           telemetry.logger
         )
       )
+      .map(PaymentStoreTracing.instrument[IO](_, telemetry.tracer))
     uncaptured <- UncapturedAuthorizationGauges.postgresQuery[IO](
       config.postgres
     )
@@ -66,8 +67,9 @@ object Main extends IOApp.Simple {
       telemetry.logger
     )
     methods <- PaymentMethodStore.postgres[IO](config.postgres, telemetry.meter)
-    gateway = PaymentGatewayClient.simulated[IO](
-      config.paymentGateway.simulated
+    gateway = PaymentGatewayTracing.instrument[IO](
+      PaymentGatewayClient.simulated[IO](config.paymentGateway.simulated),
+      telemetry.tracer
     )
     _ <- KafkaConsumers.resource[IO](
       config.kafka,

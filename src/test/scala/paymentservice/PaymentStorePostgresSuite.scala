@@ -972,7 +972,7 @@ class PaymentStorePostgresSuite
   }
 
   test(
-    "PERF-5.4: PaymentAuthorized's outbox row carries the span's traceparent; outside a span, NULL"
+    "PERF-5.4/5.9: PaymentAuthorized's outbox row carries its outbox.write span's traceparent, a child of the caller's span"
   ) {
     withContainers { postgres =>
       val inSpan = java.util.UUID.randomUUID().toString
@@ -1000,10 +1000,11 @@ class PaymentStorePostgresSuite
       Tracing.test[IO]("outbox-traceparent").use { testTracer =>
         withStores(postgres, testTracer.tracer) { (store, method) =>
           for {
-            traceId <- testTracer.tracer.span("authorize").use { span =>
-              store
-                .recordAuthorization(inSpan, 4999, method.id, authorization)
-                .as(span.context.traceIdHex)
+            (traceId, parentId) <- testTracer.tracer.span("authorize").use {
+              span =>
+                store
+                  .recordAuthorization(inSpan, 4999, method.id, authorization)
+                  .as((span.context.traceIdHex, span.context.spanIdHex))
             }
             _ <- store.recordAuthorization(
               outside,
@@ -1013,14 +1014,29 @@ class PaymentStorePostgresSuite
             )
             inSpanRows <- traceParents(inSpan)
             outsideRows <- traceParents(outside)
+            spans <- testTracer.finishedSpans
           } yield {
+            val writes = spans.filter(_.getName == "outbox.write")
+            val inSpanWrite = writes.find(_.getTraceId == traceId).get
+            assertEquals(inSpanWrite.getParentSpanId, parentId)
             assertEquals(inSpanRows.size, 1)
             assert(
-              inSpanRows.head
-                .exists(_.matches(s"00-$traceId-[0-9a-f]{16}-[0-9a-f]{2}")),
-              s"expected 00-$traceId-<span>-<flags>, got: $inSpanRows"
+              inSpanRows.head.exists(
+                _.startsWith(s"00-$traceId-${inSpanWrite.getSpanId}-")
+              ),
+              s"expected 00-$traceId-${inSpanWrite.getSpanId}-<flags>, got: $inSpanRows"
             )
-            assertEquals(outsideRows, List(None))
+            // Outside a caller's span the outbox.write span is a root, so the
+            // row still carries a traceparent: its own trace.
+            val outsideWrite = writes.find(_.getTraceId != traceId).get
+            assert(
+              outsideRows.head.exists(
+                _.startsWith(
+                  s"00-${outsideWrite.getTraceId}-${outsideWrite.getSpanId}-"
+                )
+              ),
+              s"got: $outsideRows"
+            )
           }
         }
       }
