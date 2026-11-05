@@ -4,10 +4,6 @@ This file tracks all major tracks for the project.
 
 ---
 
-- [~] **Track: PERF-5.10 — purerest 0.14.0 (Server-kind HTTP spans)**
-  *Link: [./tracks/http-client-spans_20261105/](./tracks/http-client-spans_20261105/)*
-
----
 
 
 ---
